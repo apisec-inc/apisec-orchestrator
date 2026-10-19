@@ -47,7 +47,7 @@ on:
         required: false
 
 env:
-  ORGSCAN_SPEC: apisec-orgscan==1.0.0rc1
+  ORGSCAN_SPEC: git+https://github.com/apisec-inc/apisec-orchestrator@test
 
 jobs:
   plan:
