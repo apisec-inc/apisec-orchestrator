@@ -47,6 +47,14 @@ def test_caller_inputs_exist_on_reusable_workflow():
     assert set(_load(CALLER)["jobs"]["scan"]["with"]) <= set(called)
 
 
+def test_caller_converts_number_inputs():
+    # Dispatch inputs arrive as strings; workflow_call number inputs reject them.
+    called = _load(WORKFLOW)[True]["workflow_call"]["inputs"]
+    for name, value in _load(CALLER)["jobs"]["scan"]["with"].items():
+        if called[name]["type"] == "number":
+            assert value.startswith("${{ fromJSON("), name
+
+
 def test_callers_grant_permissions_the_store_needs():
     for path in (CALLER, STANDALONE):
         assert _load(path)["permissions"] == {"contents": "read", "actions": "read"}
