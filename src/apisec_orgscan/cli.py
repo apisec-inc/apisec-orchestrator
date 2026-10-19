@@ -114,7 +114,10 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     print(f"profile={child['APISEC_RUN_PROFILE']} dry_run={dry_run}", file=sys.stderr)
     rc = subprocess.call(cmd, env=child)
     if rc:
-        _error(f"{args.path} was not uploaded (exit {rc}); it is retried next run.")
+        if dry_run:
+            _error(f"{args.path} failed to analyze (exit {rc}).")
+        else:
+            _error(f"{args.path} was not uploaded (exit {rc}); it is retried next run.")
     return rc
 
 
