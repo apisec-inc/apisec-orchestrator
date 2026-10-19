@@ -37,7 +37,7 @@ jobs:
     with:
       dry_run: ${{ inputs.dry_run == true }}
       force_full_scan: ${{ inputs.force_full_scan == true }}
-      max_repos: ${{ inputs.max_repos || 0 }}
+      max_repos: ${{ fromJSON(inputs.max_repos || '0') }}
     secrets:
       APISEC_TOKEN: ${{ secrets.APISEC_TOKEN }}
       ORG_READ_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
