@@ -1,0 +1,154 @@
+"""``apisec-orgscan``: the commands each job of the org-scan workflow runs.
+
+  plan    restore the store, list the org, write the scan matrix and settings
+  scan    run Surface analysis on one checked-out repo
+  record  note a successful scan of one repo
+  merge   fold this run's notes into the store
+
+Everything is read from environment variables the workflow maps from inputs,
+secrets and org variables, so nothing tenant-specific lives in this package.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from collections.abc import Mapping
+
+from . import __version__, repos, settings, store
+
+
+def _write_outputs(outputs: Mapping[str, str]) -> None:
+    lines = "".join(f"{k}={v}\n" for k, v in outputs.items())
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(lines)
+    else:
+        sys.stdout.write(lines)
+
+
+def _warn(message: str) -> None:
+    print(f"::warning title=APIsec Surface::{message}", file=sys.stderr)
+
+
+def _error(message: str) -> int:
+    print(f"::error title=APIsec Surface::{message}", file=sys.stderr)
+    return 1
+
+
+def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
+    org = env.get("TARGET_ORG", "").strip()
+    if not org:
+        return _error("TARGET_ORG is empty; refusing to guess which org to scan.")
+    token = env.get("ORG_READ_TOKEN") or env.get("GITHUB_TOKEN", "")
+    if not env.get("ORG_READ_TOKEN"):
+        _warn("ORG_READ_TOKEN is not set; only public repos and this repo can be scanned.")
+
+    run_settings, warnings = settings.resolve(env)
+    for warning in warnings:
+        _warn(warning)
+
+    host_repo = env.get("GITHUB_REPOSITORY", "").strip()
+    store.restore(host_repo, env.get("GITHUB_TOKEN", ""))
+    cache = store.load()
+    print(f"Store: {len(cache)} repos known.", file=sys.stderr)
+
+    org_repos = repos.list_org_repos(org, token)
+    print(f"Org '{org}': {len(org_repos)} repos.", file=sys.stderr)
+
+    exclude = {name.strip() for name in env.get("EXCLUDE_REPOS", "").split(",") if name.strip()}
+    if host_repo:
+        exclude.add(host_repo)
+    empty = repos.find_empty(org_repos, token)
+    if empty:
+        print(f"Skipping empty repos: {', '.join(sorted(empty))}", file=sys.stderr)
+
+    limit = settings.max_repos(env)
+    cap = min(limit, repos.MATRIX_HARD_LIMIT) if limit else repos.MATRIX_HARD_LIMIT
+    force = settings.truthy(env.get("FORCE_FULL_SCAN"))
+    candidates = repos.select_candidates(org_repos, cache, force, cap, frozenset(exclude), empty)
+
+    print(
+        f"Scan plan: {len(candidates)} repo(s), max-parallel {run_settings['throughput']}"
+        f"{' (full scan)' if force else ''}",
+        file=sys.stderr,
+    )
+    for c in candidates:
+        print(f"  {c['repo_full_name']}", file=sys.stderr)
+
+    matrix = json.dumps({"include": candidates}, separators=(",", ":"), ensure_ascii=True)
+    _write_outputs({"count": str(len(candidates)), "matrix": matrix, **run_settings})
+    return 0
+
+
+def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
+    endpoint = env.get("APISEC_ENDPOINT", "").strip()
+    if not endpoint:
+        return _error("Set the APISEC_ENDPOINT org variable to your APIsec API URL.")
+    dry_run = settings.truthy(env.get("DRY_RUN"))
+    if not dry_run and not env.get("APISEC_PAT"):
+        return _error("Set the APISEC_TOKEN secret, or run with dry_run.")
+
+    child = dict(env)
+    child["APISEC_CANONICAL_REPO_ID"] = f"github:{args.repo_id}"
+    child["APISEC_REGISTRATION_CODE"] = "ci-orchestrator"
+    child["APISEC_RUN_PROFILE"] = env.get("RUN_PROFILE") or "surface"
+    if env.get("APISEC_LLM_ENRICHMENT", "").strip():
+        child["APISEC_SURFACE_LLM_EXTRACTION"] = env["APISEC_LLM_ENRICHMENT"].strip()
+
+    cmd = [
+        "apisec-surface",
+        "analyze",
+        args.path,
+        "--no-detect-monorepo",
+        "--skip-if-no-routes",
+        "--api-url",
+        endpoint,
+    ]
+    if dry_run:
+        cmd.append("--dry-run")
+    print(f"profile={child['APISEC_RUN_PROFILE']} dry_run={dry_run}", file=sys.stderr)
+    rc = subprocess.call(cmd, env=child)
+    if rc:
+        _error(f"{args.path} was not uploaded (exit {rc}); it is retried next run.")
+    return rc
+
+
+def cmd_record(args: argparse.Namespace, _: Mapping[str, str]) -> int:
+    store.record(args.repo_id, args.pushed_at)
+    return 0
+
+
+def cmd_merge(_: argparse.Namespace, env: Mapping[str, str]) -> int:
+    store.restore(env.get("GITHUB_REPOSITORY", ""), env.get("GITHUB_TOKEN", ""))
+    current = store.load()
+    applied = store.merge(current)
+    store.save(current)
+    print(f"Store: {applied} update(s) applied, {len(current)} repos known.", file=sys.stderr)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="apisec-orgscan")
+    parser.add_argument("--version", action="version", version=__version__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("plan").set_defaults(fn=cmd_plan)
+    scan = sub.add_parser("scan")
+    scan.add_argument("path")
+    scan.add_argument("--repo-id", required=True)
+    scan.set_defaults(fn=cmd_scan)
+    record = sub.add_parser("record")
+    record.add_argument("--repo-id", required=True)
+    record.add_argument("--pushed-at", required=True)
+    record.set_defaults(fn=cmd_record)
+    sub.add_parser("merge").set_defaults(fn=cmd_merge)
+    args = parser.parse_args(argv)
+    return args.fn(args, os.environ)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

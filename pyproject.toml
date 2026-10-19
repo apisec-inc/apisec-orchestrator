@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apisec-orgscan"
+dynamic = ["version"]
+description = "Scan every repository in a GitHub organization with APIsec Surface."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "pyyaml>=6", "actionlint-py>=1.7"]
+
+[project.scripts]
+apisec-orgscan = "apisec_orgscan.cli:main"
+
+[project.urls]
+Source = "https://github.com/apisec-inc/apisec-orchestrator"
+
+[tool.setuptools.dynamic]
+version = { attr = "apisec_orgscan.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,43 @@
+name: APIsec Surface org scan
+
+# Scans this organization's repositories every night and uploads the results to
+# APIsec. The scan logic is maintained by APIsec and updated through @v1, so
+# this file does not need to change.
+# Setup: https://github.com/apisec-inc/apisec-orchestrator#setup
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Analyze but do not upload
+        type: boolean
+        default: false
+      force_full_scan:
+        description: Ignore the change cache and scan every repository
+        type: boolean
+        default: false
+      max_repos:
+        description: Maximum repositories this run (0 = no limit)
+        type: number
+        default: 0
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: apisec-surface-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    uses: apisec-inc/apisec-orchestrator/.github/workflows/scan.yml@v1
+    with:
+      dry_run: ${{ inputs.dry_run == true }}
+      force_full_scan: ${{ inputs.force_full_scan == true }}
+      max_repos: ${{ inputs.max_repos || 0 }}
+    secrets:
+      APISEC_TOKEN: ${{ secrets.APISEC_TOKEN }}
+      ORG_READ_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
