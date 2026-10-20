@@ -1,10 +1,9 @@
 name: APIsec Surface org scan
 
-# Reusable workflow. Customers call it from a short workflow in their org
-# (templates/apisec-scan.yml); it runs there, on their runners, with their
-# secrets and variables. Only Surface analysis results leave the org.
+# Reusable workflow: runs in your organization on your runners. Only Surface
+# analysis results are sent to APIsec.
 #
-# Secrets (passed by name; `secrets: inherit` does not cross orgs):
+# Secrets (set on the calling workflow):
 #   APISEC_TOKEN    APIsec personal access token. Required unless dry_run.
 #   ORG_READ_TOKEN  Fine-grained PAT with Contents: read and Metadata: read on
 #                   the repos to scan. Without it only public repos are visible.
@@ -47,7 +46,7 @@ on:
         required: false
 
 env:
-  ORGSCAN_SPEC: apisec-orgscan==1.0.0rc1
+  ORGSCAN_SPEC: apisec-orgscan==1.0.0
 
 jobs:
   plan:

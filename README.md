@@ -20,9 +20,9 @@ sent to APIsec.
    | `ORG_READ_TOKEN` | Fine-grained GitHub PAT for the org with **Contents: read** and **Metadata: read** |
 
 3. Add the variable `APISEC_ENDPOINT` with your APIsec API URL, e.g. `https://api.apisecapps.com`.
-4. Actions → **APIsec Surface org scan** → **Run workflow** with **dry_run** checked. The plan lists the
-   repositories that would be scanned; nothing is uploaded.
-5. Run it again without **dry_run**. After that it runs nightly at 02:00 UTC.
+4. Actions → **APIsec Surface org scan** → **Run workflow**. Optionally enable **dry_run** first to
+   verify setup (repos are analyzed locally; nothing is uploaded to APIsec).
+5. Run without **dry_run** to upload results. After that, scans run nightly at 02:00 UTC.
 
 For a first scan of a large org, set **max_repos** (e.g. `100`) and run until the plan is empty.
 

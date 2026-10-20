@@ -1,8 +1,6 @@
 name: APIsec Surface org scan
 
-# Scans this organization's repositories every night and uploads the results to
-# APIsec. The scan logic is maintained by APIsec and updated through @v1, so
-# this file does not need to change.
+# Nightly scan of this organization's repositories with APIsec Surface.
 # Setup: https://github.com/apisec-inc/apisec-orchestrator#setup
 
 on:
