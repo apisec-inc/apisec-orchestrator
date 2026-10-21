@@ -46,7 +46,7 @@ on:
         required: false
 
 env:
-  ORGSCAN_SPEC: apisec-orgscan==1.0.0
+  ORGSCAN_SPEC: apisec-orgscan==1.0.1
 
 jobs:
   plan:
@@ -84,7 +84,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.count != '0'
     runs-on: ${{ (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'self-hosted' && fromJSON('["self-hosted","apisec"]') || 'ubuntu-latest' }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
       max-parallel: ${{ fromJSON(needs.plan.outputs.throughput) }}

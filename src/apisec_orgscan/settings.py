@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-CLI_VERSION = "1.0.0"
+CLI_VERSION = "1.1.0"
 DEFAULT_THROUGHPUT = 2
 MAX_THROUGHPUT = 10
 RUN_PROFILES = ("surface", "legacy")
