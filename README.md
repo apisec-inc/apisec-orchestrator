@@ -61,7 +61,9 @@ access to the org. If both are set, the app is used.
 | `APISEC_LLM_ENRICHMENT` | on | `0` keeps source snippets out of LLM-assisted route discovery |
 | `APISEC_CLI_VERSION` | newest 1.x | Pin the Surface CLI to one release, e.g. `1.2.0`, for change control or to hold back a bad release |
 
-Self-hosted runners need Python 3.10+, git, and outbound access to GitHub, PyPI and `APISEC_ENDPOINT`.
+Self-hosted runners must run Linux (x64 or arm64) with git, and need outbound access to GitHub, PyPI and
+`APISEC_ENDPOINT`; each job installs its own Python. macOS runners are not supported: there,
+`actions/setup-python` installs Python only under `/Users/runner/hostedtoolcache`.
 
 ## Updates
 
