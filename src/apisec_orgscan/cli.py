@@ -97,7 +97,8 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     candidates = repos.select_candidates(org_repos, cache, force, cap, frozenset(exclude), empty)
 
     print(
-        f"Scan plan: {len(candidates)} repo(s), max-parallel {run_settings['throughput']}"
+        f"Scan plan: {len(candidates)} repo(s), max-parallel {run_settings['throughput']}, "
+        f"Surface CLI {run_settings['cli_version']}"
         f"{' (full scan)' if force else ''}",
         file=sys.stderr,
     )

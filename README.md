@@ -59,7 +59,7 @@ access to the org. If both are set, the app is used.
 | `TARGET_ORG` | this org | Scan a different org (the GitHub App must be installed there) |
 | `EXCLUDE_REPOS` | | Comma-separated `owner/repo` names to skip |
 | `APISEC_LLM_ENRICHMENT` | on | `0` keeps source snippets out of LLM-assisted route discovery |
-| `APISEC_CLI_VERSION` | pinned | Override the Surface CLI version |
+| `APISEC_CLI_VERSION` | newest 1.x | Pin the Surface CLI to one release, e.g. `1.2.0`, for change control or to hold back a bad release |
 
 Self-hosted runners need Python 3.10+, git, and outbound access to GitHub, PyPI and `APISEC_ENDPOINT`.
 

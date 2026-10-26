@@ -20,7 +20,7 @@ name: APIsec Surface org scan
 #   TARGET_ORG             Scan another org than the caller's.
 #   EXCLUDE_REPOS          Comma-separated owner/repo names to skip.
 #   APISEC_LLM_ENRICHMENT  0 to keep source snippets out of LLM gap-filling.
-#   APISEC_CLI_VERSION     Override the pinned Surface CLI version.
+#   APISEC_CLI_VERSION     Pin the Surface CLI version. Default: newest compatible 1.x.
 
 on:
   workflow_call:

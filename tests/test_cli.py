@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from apisec_orgscan import cli, repos, store
+from apisec_orgscan import cli, repos, settings, store
 
 ORG_REPOS = [
     {"id": 1, "full_name": "acme/api", "name": "api", "pushed_at": "2026-10-02T00:00:00Z", "size": 5},
@@ -24,6 +24,7 @@ def plan_env(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "restore", lambda *_: False)
     monkeypatch.setattr(repos, "list_org_repos", lambda org, token: ORG_REPOS)
     monkeypatch.setattr(repos, "find_empty", lambda *_: frozenset())
+    monkeypatch.setattr(settings, "newest_cli_version", lambda: "1.2.0")
     env = {"TARGET_ORG": "acme", "ORG_READ_TOKEN": "pat", "GITHUB_REPOSITORY": "acme/apisec-scan"}
     return env, out
 
