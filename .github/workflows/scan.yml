@@ -4,12 +4,16 @@ name: APIsec Surface org scan
 # analysis results are sent to APIsec.
 #
 # Secrets (set on the calling workflow):
-#   APISEC_TOKEN    APIsec personal access token. Required unless dry_run.
-#   ORG_READ_TOKEN  Fine-grained PAT with Contents: read and Metadata: read on
-#                   the repos to scan. Without it only public repos are visible.
+#   APISEC_TOKEN                  APIsec personal access token. Required unless dry_run.
+#   ORCHESTRATOR_APP_PRIVATE_KEY  Private key of a GitHub App with Contents: read and
+#                                 Metadata: read, installed on the org. The installation's
+#                                 repository selection is the scan scope. Recommended.
+#   ORG_READ_TOKEN                Alternative to the app: fine-grained PAT with Contents: read
+#                                 and Metadata: read. With neither, only public repos are visible.
 #
 # Org variables:
 #   APISEC_ENDPOINT        APIsec API URL. Required.
+#   ORCHESTRATOR_APP_ID    The GitHub App's App ID or Client ID. Used with the private key.
 #   THROUGHPUT             Max parallel scans, 1-10. Default 2.
 #   ORCHESTRATOR_RUNNER    github-hosted (default) | self-hosted.
 #   APISEC_RUN_PROFILE     surface (default) | legacy.
@@ -44,9 +48,11 @@ on:
         required: false
       ORG_READ_TOKEN:
         required: false
+      ORCHESTRATOR_APP_PRIVATE_KEY:
+        required: false
 
 env:
-  ORGSCAN_SPEC: apisec-orgscan==1.0.1
+  ORGSCAN_SPEC: apisec-orgscan==1.1.0
 
 jobs:
   plan:
@@ -59,7 +65,28 @@ jobs:
       run_profile: ${{ steps.plan.outputs.run_profile }}
       cli_version: ${{ steps.plan.outputs.cli_version }}
       throughput: ${{ steps.plan.outputs.throughput }}
+    env:
+      # Steps cannot test secrets in `if:`, so decide app mode once per job.
+      USE_APP: ${{ vars.ORCHESTRATOR_APP_ID != '' && secrets.ORCHESTRATOR_APP_PRIVATE_KEY != '' }}
     steps:
+      # Installation tokens live one hour, so every job mints its own.
+      - name: Mint GitHub App token
+        id: app-token
+        if: env.USE_APP == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.ORCHESTRATOR_APP_ID }}
+          private-key: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
+          owner: ${{ vars.TARGET_ORG || github.repository_owner }}
+          permission-contents: read
+      - name: Explain GitHub App failure
+        if: failure() && steps.app-token.outcome == 'failure'
+        env:
+          APP_ID: ${{ vars.ORCHESTRATOR_APP_ID }}
+          OWNER: ${{ vars.TARGET_ORG || github.repository_owner }}
+        run: |
+          echo "::error title=APIsec Surface::GitHub App $APP_ID (ORCHESTRATOR_APP_ID) could not get a token for '$OWNER'. Install the app on that org and grant it Contents: read and Metadata: read, or check ORCHESTRATOR_APP_PRIVATE_KEY."
+          exit 1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -67,6 +94,7 @@ jobs:
       - id: plan
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
           ORG_READ_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
           TARGET_ORG: ${{ vars.TARGET_ORG || github.repository_owner }}
           EXCLUDE_REPOS: ${{ vars.EXCLUDE_REPOS }}
@@ -89,7 +117,21 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
       max-parallel: ${{ fromJSON(needs.plan.outputs.throughput) }}
       fail-fast: false
+    env:
+      USE_APP: ${{ vars.ORCHESTRATOR_APP_ID != '' && secrets.ORCHESTRATOR_APP_PRIVATE_KEY != '' }}
     steps:
+      # Minted here rather than passed from plan: a run can outlast the token's
+      # hour. Narrowed to the one repo this job checks out.
+      - name: Mint GitHub App token
+        id: app-token
+        if: env.USE_APP == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.ORCHESTRATOR_APP_ID }}
+          private-key: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
+          owner: ${{ vars.TARGET_ORG || github.repository_owner }}
+          repositories: ${{ matrix.repo_name }}
+          permission-contents: read
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -102,7 +144,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ matrix.repo_full_name }}
-          token: ${{ secrets.ORG_READ_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token || secrets.ORG_READ_TOKEN || github.token }}
           path: repos/${{ matrix.repo_name }}
           fetch-depth: 1
       - name: Analyze

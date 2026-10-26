@@ -40,13 +40,25 @@ def _error(message: str) -> int:
     return 1
 
 
+def github_credential(env: Mapping[str, str]) -> tuple[str, str]:
+    """(kind, token) for listing repos: GitHub App token, then PAT, then the job token."""
+    if env.get("APP_TOKEN"):
+        return "app", env["APP_TOKEN"]
+    if env.get("ORG_READ_TOKEN"):
+        return "pat", env["ORG_READ_TOKEN"]
+    return "job", env.get("GITHUB_TOKEN", "")
+
+
 def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     org = env.get("TARGET_ORG", "").strip()
     if not org:
         return _error("TARGET_ORG is empty; refusing to guess which org to scan.")
-    token = env.get("ORG_READ_TOKEN") or env.get("GITHUB_TOKEN", "")
-    if not env.get("ORG_READ_TOKEN"):
-        _warn("ORG_READ_TOKEN is not set; only public repos and this repo can be scanned.")
+    kind, token = github_credential(env)
+    if kind == "job":
+        _warn(
+            "Neither a GitHub App (ORCHESTRATOR_APP_ID + ORCHESTRATOR_APP_PRIVATE_KEY) nor "
+            "ORG_READ_TOKEN is set; only public repos and this repo can be scanned."
+        )
 
     run_settings, warnings = settings.resolve(env)
     for warning in warnings:
@@ -57,8 +69,20 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     cache = store.load()
     print(f"Store: {len(cache)} repos known.", file=sys.stderr)
 
-    org_repos = repos.list_org_repos(org, token)
-    print(f"Org '{org}': {len(org_repos)} repos.", file=sys.stderr)
+    if kind == "app":
+        org_repos = repos.list_installation_repos(token)
+        print(f"GitHub App installation on '{org}': {len(org_repos)} repos selected.", file=sys.stderr)
+        if not org_repos:
+            return _error(
+                f"The GitHub App installation on '{org}' has no repositories selected; "
+                "choose the repos to scan in the app's installation settings."
+            )
+    else:
+        org_repos = repos.list_org_repos(org, token)
+        print(
+            f"Org '{org}': {len(org_repos)} repos ({'ORG_READ_TOKEN' if kind == 'pat' else 'job token'}).",
+            file=sys.stderr,
+        )
 
     exclude = {name.strip() for name in env.get("EXCLUDE_REPOS", "").split(",") if name.strip()}
     if host_repo:

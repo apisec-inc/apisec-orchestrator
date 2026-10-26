@@ -39,7 +39,42 @@ def test_caller_passes_secrets_by_name():
     assert job["secrets"] == {
         "APISEC_TOKEN": "${{ secrets.APISEC_TOKEN }}",
         "ORG_READ_TOKEN": "${{ secrets.ORG_READ_TOKEN }}",
+        "ORCHESTRATOR_APP_PRIVATE_KEY": "${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}",
     }
+
+
+def test_caller_secrets_exist_on_reusable_workflow():
+    called = _load(WORKFLOW)[True]["workflow_call"]["secrets"]
+    assert set(_load(CALLER)["jobs"]["scan"]["secrets"]) <= set(called)
+
+
+def _mint_step(job):
+    steps = [s for s in job["steps"] if s.get("uses", "").startswith("actions/create-github-app-token@")]
+    assert len(steps) == 1
+    return steps[0]
+
+
+def test_jobs_needing_github_access_mint_their_own_app_token():
+    # Installation tokens last an hour; minting per job keeps long runs working.
+    jobs = _load(WORKFLOW)["jobs"]
+    for name in ("plan", "scan"):
+        step = _mint_step(jobs[name])
+        assert step["id"] == "app-token"
+        assert step["if"] == "env.USE_APP == 'true'"
+        assert "secrets.ORCHESTRATOR_APP_PRIVATE_KEY" in jobs[name]["env"]["USE_APP"]
+        assert step["with"]["permission-contents"] == "read"
+    assert _mint_step(jobs["scan"])["with"]["repositories"] == "${{ matrix.repo_name }}"
+    assert "app-token" not in str(jobs["update-store"])
+
+
+def test_github_access_prefers_app_token_then_pat_then_job_token():
+    jobs = _load(WORKFLOW)["jobs"]
+    plan_env = next(s for s in jobs["plan"]["steps"] if s.get("id") == "plan")["env"]
+    assert plan_env["APP_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    checkout = next(s for s in jobs["scan"]["steps"] if s.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["token"] == (
+        "${{ steps.app-token.outputs.token || secrets.ORG_READ_TOKEN || github.token }}"
+    )
 
 
 def test_caller_inputs_exist_on_reusable_workflow():

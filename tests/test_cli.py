@@ -60,7 +60,42 @@ def test_plan_without_org_token_warns_and_uses_github_token(plan_env, monkeypatc
     env = {k: v for k, v in env.items() if k != "ORG_READ_TOKEN"} | {"GITHUB_TOKEN": "gh"}
     assert cli.cmd_plan(None, env) == 0
     assert seen["token"] == "gh"
-    assert "ORG_READ_TOKEN is not set" in capsys.readouterr().err
+    assert "ORG_READ_TOKEN is set" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({"APP_TOKEN": "ghs", "ORG_READ_TOKEN": "pat", "GITHUB_TOKEN": "gh"}, ("app", "ghs")),
+        ({"APP_TOKEN": "", "ORG_READ_TOKEN": "pat", "GITHUB_TOKEN": "gh"}, ("pat", "pat")),
+        ({"APP_TOKEN": "", "ORG_READ_TOKEN": "", "GITHUB_TOKEN": "gh"}, ("job", "gh")),
+    ],
+)
+def test_credential_order_app_then_pat_then_job_token(env, expected):
+    assert cli.github_credential(env) == expected
+
+
+def test_plan_with_app_token_lists_installation_repos(plan_env, monkeypatch, capsys):
+    env, out = plan_env
+    seen = {}
+
+    def _installation(token):
+        seen["token"] = token
+        return ORG_REPOS[:1]
+
+    monkeypatch.setattr(repos, "list_installation_repos", _installation)
+    monkeypatch.setattr(repos, "list_org_repos", lambda *_: pytest.fail("listed the whole org"))
+    assert cli.cmd_plan(None, {**env, "APP_TOKEN": "ghs"}) == 0
+    assert seen["token"] == "ghs"
+    assert [r["repo_full_name"] for r in json.loads(_outputs(out)["matrix"])["include"]] == ["acme/api"]
+    assert "::warning" not in capsys.readouterr().err
+
+
+def test_plan_fails_when_installation_has_no_repos(plan_env, monkeypatch, capsys):
+    env, _ = plan_env
+    monkeypatch.setattr(repos, "list_installation_repos", lambda _t: [])
+    assert cli.cmd_plan(None, {**env, "APP_TOKEN": "ghs"}) == 1
+    assert "no repositories selected" in capsys.readouterr().err
 
 
 def test_plan_requires_target_org(plan_env):
