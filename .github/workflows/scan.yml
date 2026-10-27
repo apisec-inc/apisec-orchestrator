@@ -52,7 +52,7 @@ on:
         required: false
 
 env:
-  ORGSCAN_SPEC: apisec-orgscan==1.1.0
+  ORGSCAN_SPEC: apisec-orgscan>=1.1,<2
 
 jobs:
   plan:
@@ -64,6 +64,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       run_profile: ${{ steps.plan.outputs.run_profile }}
       cli_version: ${{ steps.plan.outputs.cli_version }}
+      orgscan_version: ${{ steps.orgscan.outputs.version }}
       throughput: ${{ steps.plan.outputs.throughput }}
     env:
       # Steps cannot test secrets in `if:`, so decide app mode once per job.
@@ -90,7 +91,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install --quiet "$ORGSCAN_SPEC"
+      # Newest compatible release, resolved once so every job in the run uses it.
+      - id: orgscan
+        run: |
+          pip install --quiet --upgrade "$ORGSCAN_SPEC"
+          echo "version=$(apisec-orgscan --version)" >> "$GITHUB_OUTPUT"
       - id: plan
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -137,9 +142,10 @@ jobs:
           python-version: '3.11'
       - name: Install
         env:
+          ORGSCAN_VERSION: ${{ needs.plan.outputs.orgscan_version }}
           CLI_VERSION: ${{ needs.plan.outputs.cli_version }}
         run: |
-          pip install --quiet "$ORGSCAN_SPEC" "apisec-surface==$CLI_VERSION"
+          pip install --quiet "apisec-orgscan==$ORGSCAN_VERSION" "apisec-surface==$CLI_VERSION"
           apisec-surface telemetry off || true
       - uses: actions/checkout@v4
         with:
@@ -180,7 +186,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install --quiet "$ORGSCAN_SPEC"
+      - env:
+          ORGSCAN_VERSION: ${{ needs.plan.outputs.orgscan_version }}
+        run: pip install --quiet "apisec-orgscan==$ORGSCAN_VERSION"
       - uses: actions/download-artifact@v4
         with:
           pattern: ts-update-*

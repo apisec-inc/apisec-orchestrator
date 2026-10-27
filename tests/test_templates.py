@@ -18,8 +18,24 @@ def _load(path):
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def test_reusable_workflow_pins_this_package_version():
-    assert _load(WORKFLOW)["env"]["ORGSCAN_SPEC"] == f"apisec-orgscan=={__version__}"
+def test_reusable_workflow_installs_newest_release_of_this_major_line():
+    major, minor = __version__.split(".")[:2]
+    spec = f"apisec-orgscan>={major}.{minor},<{int(major) + 1}"
+    assert _load(WORKFLOW)["env"]["ORGSCAN_SPEC"] == spec
+    assert _load(STANDALONE)["env"]["ORGSCAN_SPEC"] == spec
+
+
+def test_later_jobs_install_the_orgscan_version_plan_resolved():
+    # A release published mid-run must not mix versions within the run.
+    jobs = _load(WORKFLOW)["jobs"]
+    resolve = next(s for s in jobs["plan"]["steps"] if s.get("id") == "orgscan")
+    assert '--upgrade "$ORGSCAN_SPEC"' in resolve["run"]
+    assert jobs["plan"]["outputs"]["orgscan_version"] == "${{ steps.orgscan.outputs.version }}"
+    for name in ("scan", "update-store"):
+        installs = [s for s in jobs[name]["steps"] if "pip install" in s.get("run", "")]
+        assert len(installs) == 1
+        assert '"apisec-orgscan==$ORGSCAN_VERSION"' in installs[0]["run"]
+        assert installs[0]["env"]["ORGSCAN_VERSION"] == "${{ needs.plan.outputs.orgscan_version }}"
 
 
 def test_standalone_is_generated_from_reusable_workflow():
@@ -29,7 +45,6 @@ def test_standalone_is_generated_from_reusable_workflow():
 
 def test_standalone_runs_the_same_jobs():
     assert _load(STANDALONE)["jobs"] == _load(WORKFLOW)["jobs"]
-    assert _load(STANDALONE)["env"]["ORGSCAN_SPEC"].startswith("apisec-orgscan~=")
 
 
 def test_caller_passes_secrets_by_name():

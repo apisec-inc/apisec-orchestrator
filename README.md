@@ -105,7 +105,9 @@ holds the GitHub-only parts (matrix fan-out, runners, artifacts).
 ### Releasing
 
 1. Set `__version__` in `src/apisec_orgscan/__init__.py` and run `python scripts/sync_templates.py`
-   (pins the workflow and regenerates the standalone template).
+   (sets the workflow's `apisec-orgscan` range, e.g. `>=1.1,<2`, and regenerates the standalone template).
+   Runs use the newest release in that range, so a patch or minor release reaches `@v1` callers
+   without a new tag; a workflow change still needs one.
 2. Merge, then push tag `vX.Y.Z`. The release workflow tests, publishes to PyPI and moves `vX`.
 
 Tags such as `v1.1.0rc1` publish a pre-release without moving `v1`; point a test caller at that tag.
