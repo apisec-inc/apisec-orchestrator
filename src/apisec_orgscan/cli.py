@@ -120,7 +120,7 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
 
     child = dict(env)
     child["APISEC_CANONICAL_REPO_ID"] = f"github:{args.repo_id}"
-    child["APISEC_REGISTRATION_CODE"] = "ci-orchestrator"
+    child["APISEC_REGISTRATION_CODE"] = env.get("APISEC_REGISTRATION_CODE", "").strip() or "ci-orchestrator"
     child["APISEC_RUN_PROFILE"] = env.get("RUN_PROFILE") or "surface"
     if env.get("APISEC_LLM_ENRICHMENT", "").strip():
         child["APISEC_SURFACE_LLM_EXTRACTION"] = env["APISEC_LLM_ENRICHMENT"].strip()

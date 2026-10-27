@@ -150,6 +150,7 @@ jobs:
           APISEC_PAT: ${{ secrets.APISEC_TOKEN }}
           APISEC_ENDPOINT: ${{ vars.APISEC_ENDPOINT }}
           APISEC_LLM_ENRICHMENT: ${{ vars.APISEC_LLM_ENRICHMENT }}
+          APISEC_REGISTRATION_CODE: ${{ vars.APISEC_REGISTRATION_CODE }}
           RUN_PROFILE: ${{ needs.plan.outputs.run_profile }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: apisec-orgscan scan "repos/$REPO_NAME" --repo-id "$REPO_ID"

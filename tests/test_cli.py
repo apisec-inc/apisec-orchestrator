@@ -139,6 +139,11 @@ def test_scan_runs_surface_with_canonical_repo_id(ran):
     assert "APISEC_SURFACE_LLM_EXTRACTION" not in child
 
 
+def test_scan_passes_registration_code_when_set(ran):
+    _scan({"APISEC_ENDPOINT": "https://a", "APISEC_PAT": "t", "APISEC_REGISTRATION_CODE": " acme-reg "})
+    assert ran[0][1]["APISEC_REGISTRATION_CODE"] == "acme-reg"
+
+
 def test_scan_dry_run_needs_no_token_and_passes_flag(ran):
     assert _scan({"APISEC_ENDPOINT": "https://api.example", "DRY_RUN": "true"}) == 0
     assert ran[0][0][-1] == "--dry-run"

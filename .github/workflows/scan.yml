@@ -20,6 +20,7 @@ name: APIsec Surface org scan
 #   TARGET_ORG             Scan another org than the caller's.
 #   EXCLUDE_REPOS          Comma-separated owner/repo names to skip.
 #   APISEC_LLM_ENRICHMENT  0 to keep source snippets out of LLM gap-filling.
+#   APISEC_REGISTRATION_CODE  Registration code for scanned apps. Default ci-orchestrator.
 #   APISEC_CLI_VERSION     Pin the Surface CLI version. Default: newest compatible 1.x.
 
 on:
@@ -160,6 +161,7 @@ jobs:
           APISEC_PAT: ${{ secrets.APISEC_TOKEN }}
           APISEC_ENDPOINT: ${{ vars.APISEC_ENDPOINT }}
           APISEC_LLM_ENRICHMENT: ${{ vars.APISEC_LLM_ENRICHMENT }}
+          APISEC_REGISTRATION_CODE: ${{ vars.APISEC_REGISTRATION_CODE }}
           RUN_PROFILE: ${{ needs.plan.outputs.run_profile }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: apisec-orgscan scan "repos/$REPO_NAME" --repo-id "$REPO_ID"
