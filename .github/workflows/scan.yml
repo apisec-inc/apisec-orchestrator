@@ -53,7 +53,8 @@ on:
         required: false
 
 env:
-  ORGSCAN_SPEC: apisec-orgscan>=1.1,<2
+  # E2E ONLY: install this commit instead of a PyPI release. Never merge.
+  ORGSCAN_SPEC: apisec-orgscan @ git+https://github.com/apisec-inc/apisec-orchestrator@3e3ca64d3a1f3f41d7d3ccbe5fa273ec2b84086c
 
 jobs:
   plan:
@@ -146,7 +147,7 @@ jobs:
           ORGSCAN_VERSION: ${{ needs.plan.outputs.orgscan_version }}
           CLI_VERSION: ${{ needs.plan.outputs.cli_version }}
         run: |
-          pip install --quiet "apisec-orgscan==$ORGSCAN_VERSION" "apisec-surface==$CLI_VERSION"
+          pip install --quiet "$ORGSCAN_SPEC" "apisec-surface==$CLI_VERSION"
           apisec-surface telemetry off || true
       - uses: actions/checkout@v4
         with:
@@ -192,7 +193,7 @@ jobs:
           python-version: '3.11'
       - env:
           ORGSCAN_VERSION: ${{ needs.plan.outputs.orgscan_version }}
-        run: pip install --quiet "apisec-orgscan==$ORGSCAN_VERSION"
+        run: pip install --quiet "$ORGSCAN_SPEC"
       - uses: actions/download-artifact@v4
         with:
           pattern: ts-update-*
