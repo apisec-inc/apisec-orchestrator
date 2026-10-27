@@ -66,6 +66,25 @@ Self-hosted runners must run Linux (x64 or arm64) with git, and need outbound ac
 `APISEC_ENDPOINT`; each job installs its own Python. macOS runners are not supported: there,
 `actions/setup-python` installs Python only under `/Users/runner/hostedtoolcache`.
 
+## Applications in APIsec
+
+Each scanned repository has one application in APIsec, found by the repository's id. Scans identify
+a repository as `github:<owner>/<repo>`, the id the Surface CLI uses when it runs in the repository's
+own workflow, so a repository scanned both ways keeps one application. Releases before 1.1 and the
+APIsec GitHub Action use the repository's numeric id, `github:<id>`, so each scan binds both ids to
+the same application:
+
+- Before scanning a repository whose numeric id already has an application, the scan binds the
+  name id to that application. Repositories scanned by earlier releases keep their applications,
+  and so does a repository that is renamed.
+- After uploading, the scan binds the numeric id to the repository's application, so the GitHub
+  Action finds it too.
+
+Looking up a repository's application needs an `APISEC_TOKEN` with the Admin role. With another
+role, only repositories this workflow has uploaded before are matched by numeric id; a repository
+that only the GitHub Action has scanned gets a second application. If a repository already has two
+applications, the run log warns and names both; the scan updates the one bound to its name.
+
 ## Updates
 
 Your workflow calls `scan.yml@v1`. Each release moves `v1`, and every run installs the newest 1.x of
@@ -83,8 +102,8 @@ arrive without editing it. Setup is otherwise identical.
 
 ## Moving from the zip version
 
-Either way, applications in APIsec are matched by each scanned repository's GitHub id, so no duplicates
-are created.
+Either way, each repository keeps its application in APIsec (see
+[Applications in APIsec](#applications-in-apisec)).
 
 - **Start fresh:** delete the old orchestrator repository and follow [Setup](#setup). The first run
   rescans every repository once.

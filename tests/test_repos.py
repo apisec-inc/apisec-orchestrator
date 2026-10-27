@@ -18,7 +18,13 @@ def repo(rid, name="r", pushed="2026-01-01T00:00:00Z", **extra):
 def test_never_seen_repo_is_selected():
     out = select_candidates([repo(1)], cache={}, force_full_scan=False, cap=256)
     assert out == [
-        {"repo_id": "1", "repo_full_name": "org/r", "repo_name": "r", "pushed_at": "2026-01-01T00:00:00Z"}
+        {
+            "repo_id": "1",
+            "repo_full_name": "org/r",
+            "repo_name": "r",
+            "pushed_at": "2026-01-01T00:00:00Z",
+            "scanned_before": "false",
+        }
     ]
 
 
@@ -229,3 +235,9 @@ def test_installation_repos_sorted_most_recently_pushed_first(monkeypatch):
     monkeypatch.setattr(github, "get_paginated", lambda url, token: seen.setdefault("url", url) and found)
     assert [r["id"] for r in repos.list_installation_repos("tok")] == [2, 1, 3]
     assert seen["url"] == f"{github.API}/installation/repositories?per_page=100"
+
+
+def test_repo_in_the_store_is_marked_scanned_before():
+    cache = {"1": {"pushed_at": "2025-01-01T00:00:00Z"}}
+    out = select_candidates([repo(1)], cache=cache, force_full_scan=False, cap=256)
+    assert out[0]["scanned_before"] == "true"

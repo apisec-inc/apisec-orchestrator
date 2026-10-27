@@ -108,3 +108,11 @@ def test_caller_converts_number_inputs():
 def test_callers_grant_permissions_the_store_needs():
     for path in (CALLER, STANDALONE):
         assert _load(path)["permissions"] == {"contents": "read", "actions": "read"}
+
+
+def test_scan_names_the_repo_it_checked_out():
+    # Surface finds the repo's application by this name, not the caller repo's.
+    analyze = next(s for s in _load(WORKFLOW)["jobs"]["scan"]["steps"] if s.get("name") == "Analyze")
+    assert '--repo-full-name "$REPO_FULL_NAME"' in analyze["run"]
+    assert analyze["env"]["REPO_FULL_NAME"] == "${{ matrix.repo_full_name }}"
+    assert analyze["env"]["SCANNED_BEFORE"] == "${{ matrix.scanned_before }}"

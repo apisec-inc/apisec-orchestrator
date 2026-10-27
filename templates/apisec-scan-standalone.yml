@@ -147,13 +147,15 @@ jobs:
         env:
           REPO_NAME: ${{ matrix.repo_name }}
           REPO_ID: ${{ matrix.repo_id }}
+          REPO_FULL_NAME: ${{ matrix.repo_full_name }}
+          SCANNED_BEFORE: ${{ matrix.scanned_before }}
           APISEC_PAT: ${{ secrets.APISEC_TOKEN }}
           APISEC_ENDPOINT: ${{ vars.APISEC_ENDPOINT }}
           APISEC_LLM_ENRICHMENT: ${{ vars.APISEC_LLM_ENRICHMENT }}
           APISEC_REGISTRATION_CODE: ${{ vars.APISEC_REGISTRATION_CODE }}
           RUN_PROFILE: ${{ needs.plan.outputs.run_profile }}
           DRY_RUN: ${{ inputs.dry_run }}
-        run: apisec-orgscan scan "repos/$REPO_NAME" --repo-id "$REPO_ID"
+        run: apisec-orgscan scan "repos/$REPO_NAME" --repo-id "$REPO_ID" --repo-full-name "$REPO_FULL_NAME"
       - name: Record
         if: ${{ !inputs.dry_run }}
         env:

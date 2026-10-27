@@ -67,6 +67,8 @@ def select_candidates(
                 "repo_full_name": repo["full_name"],
                 "repo_name": repo["name"],
                 "pushed_at": pushed_at,
+                # Uploaded by an earlier run, so APIsec holds it under its numeric id.
+                "scanned_before": "true" if repo_id in cache else "false",
             }
         )
         if len(candidates) >= cap:

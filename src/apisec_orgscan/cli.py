@@ -18,7 +18,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 
-from . import __version__, repos, settings, store
+from . import __version__, apisec, repos, settings, store
 
 
 def _write_outputs(outputs: Mapping[str, str]) -> None:
@@ -110,20 +110,62 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     return 0
 
 
+def _link_before_scan(endpoint: str, pat: str, repo: apisec.Repo, old: str, new: str, seen: bool) -> bool:
+    """Point ``new`` at the repo's existing application. True if ``old`` still needs binding after."""
+    bound = apisec.lookup(endpoint, pat, [old, new])
+    if bound is None:
+        # Token may not look bindings up; only a repo this workflow uploaded is known to have one.
+        if seen:
+            apisec.bind(endpoint, pat, repo, new, apisec.resolve(endpoint, pat, repo, old))
+            print(f"Bound {new} to the application of {old}.", file=sys.stderr)
+        return True
+    old_app, new_app = bound.get(old), bound.get(new)
+    if old_app and not new_app:
+        apisec.bind(endpoint, pat, repo, new, old_app)
+        print(f"Bound {new} to application {old_app} ({old}).", file=sys.stderr)
+    elif old_app and new_app and old_app != new_app:
+        _warn(
+            f"{repo.full_name} has two APIsec applications: {old_app} ({old}) and {new_app} ({new}). "
+            f"This scan updates {new_app}."
+        )
+    return not old_app
+
+
 def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     endpoint = env.get("APISEC_ENDPOINT", "").strip()
     if not endpoint:
         return _error("Set the APISEC_ENDPOINT org variable to your APIsec API URL.")
     dry_run = settings.truthy(env.get("DRY_RUN"))
-    if not dry_run and not env.get("APISEC_PAT"):
+    pat = env.get("APISEC_PAT", "")
+    if not dry_run and not pat:
         return _error("Set the APISEC_TOKEN secret, or run with dry_run.")
 
     child = dict(env)
-    child["APISEC_CANONICAL_REPO_ID"] = f"github:{args.repo_id}"
+    child.pop("APISEC_CANONICAL_REPO_ID", None)
+    old_id = apisec.numeric_id(args.repo_id)
+    if args.repo_full_name:
+        # Surface CLI 1.2 takes the repo id from GITHUB_REPOSITORY, which in
+        # this job names the repo running the workflow, not the one scanned.
+        child["GITHUB_REPOSITORY"] = args.repo_full_name
+        new_id = apisec.name_id(args.repo_full_name, env.get("GITHUB_SERVER_URL", ""))
+    else:
+        # Called by a workflow from before 1.1, which does not pass the name.
+        child["APISEC_CANONICAL_REPO_ID"] = old_id
+        new_id = None
     child["APISEC_REGISTRATION_CODE"] = env.get("APISEC_REGISTRATION_CODE", "").strip() or "ci-orchestrator"
     child["APISEC_RUN_PROFILE"] = env.get("RUN_PROFILE") or "surface"
     if env.get("APISEC_LLM_ENRICHMENT", "").strip():
         child["APISEC_SURFACE_LLM_EXTRACTION"] = env["APISEC_LLM_ENRICHMENT"].strip()
+
+    repo = apisec.Repo(args.path, args.repo_full_name, env.get("GITHUB_SERVER_URL", "")) if new_id else None
+    bind_old_after = False
+    if repo and not dry_run:
+        try:
+            bind_old_after = _link_before_scan(
+                endpoint, pat, repo, old_id, new_id, settings.truthy(env.get("SCANNED_BEFORE"))
+            )
+        except apisec.ApisecError as exc:
+            return _error(f"{args.path} was not scanned: could not check its APIsec application ({exc}).")
 
     cmd = [
         "apisec-surface",
@@ -136,13 +178,23 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     ]
     if dry_run:
         cmd.append("--dry-run")
-    print(f"profile={child['APISEC_RUN_PROFILE']} dry_run={dry_run}", file=sys.stderr)
+    print(
+        f"profile={child['APISEC_RUN_PROFILE']} dry_run={dry_run} repo_id={new_id or old_id}", file=sys.stderr
+    )
     rc = subprocess.call(cmd, env=child)
     if rc:
         if dry_run:
             _error(f"{args.path} failed to analyze (exit {rc}).")
         else:
             _error(f"{args.path} was not uploaded (exit {rc}); it is retried next run.")
+    elif bind_old_after:
+        # Lets scanners that still send the numeric id (the APIsec GitHub Action) find it too.
+        try:
+            app_id = apisec.resolve(endpoint, pat, repo, new_id)
+            apisec.bind(endpoint, pat, repo, old_id, app_id)
+            print(f"Bound {old_id} to application {app_id}.", file=sys.stderr)
+        except apisec.ApisecError as exc:
+            _warn(f"{args.path} was uploaded, but {old_id} could not be bound to its application ({exc}).")
     return rc
 
 
@@ -168,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     scan = sub.add_parser("scan")
     scan.add_argument("path")
     scan.add_argument("--repo-id", required=True)
+    scan.add_argument("--repo-full-name", default="")
     scan.set_defaults(fn=cmd_scan)
     record = sub.add_parser("record")
     record.add_argument("--repo-id", required=True)

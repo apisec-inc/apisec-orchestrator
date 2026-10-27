@@ -49,6 +49,12 @@ def test_cli_version_variable_pins_without_lookup():
     assert resolved["cli_version"] == "1.2.3"
 
 
+def test_cli_version_pin_older_than_minimum_uses_minimum_with_warning():
+    resolved, warnings = settings.resolve({"APISEC_CLI_VERSION": "1.1.0"}, newest=lambda: "1.9.0")
+    assert resolved["cli_version"] == settings.CLI_MIN_VERSION == "1.2.0"
+    assert "APISEC_CLI_VERSION 1.1.0" in warnings[0]
+
+
 def test_cli_version_falls_back_to_minimum_with_warning():
     resolved, warnings = settings.resolve({}, newest=lambda: None)
     assert resolved["cli_version"] == settings.CLI_MIN_VERSION
