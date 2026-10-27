@@ -68,9 +68,11 @@ Self-hosted runners must run Linux (x64 or arm64) with git, and need outbound ac
 
 ## Updates
 
-Your workflow calls `scan.yml@v1`. Each release moves `v1`, so fixes reach you on the next nightly run
-with no change on your side. Breaking changes ship as `v2`. To control updates yourself, replace `@v1`
-with a release tag such as `@v1.0.0`.
+Your workflow calls `scan.yml@v1`. Each release moves `v1`, and every run installs the newest 1.x of
+the `apisec-orgscan` package and the Surface CLI, so fixes reach you on the next nightly run with no
+change on your side. Breaking changes ship as `v2`. Replacing `@v1` with a release tag such as `@v1.1.0`
+fixes the workflow itself; the packages still update within 1.x. To hold the Surface CLI at one
+release, set `APISEC_CLI_VERSION`.
 
 ## Organizations that only allow their own workflows
 
