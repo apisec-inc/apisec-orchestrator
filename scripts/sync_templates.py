@@ -59,6 +59,7 @@ permissions:
 concurrency:
   group: apisec-surface-scan
   cancel-in-progress: false
+  queue: max
 
 env:
   ORGSCAN_SPEC: apisec-orgscan~={major}.{minor}

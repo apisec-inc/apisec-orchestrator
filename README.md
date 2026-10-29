@@ -25,6 +25,8 @@ sent to APIsec.
 5. Run without **dry_run** to upload results. After that, scans run nightly at 02:00 UTC.
 
 For a first scan of a large org, set **max_repos** (e.g. `100`) and run until the plan is empty.
+Runs started while one is going wait their turn instead of being cancelled, so you can queue several
+at once.
 
 ### Optional variables
 
