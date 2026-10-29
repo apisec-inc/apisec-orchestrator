@@ -72,13 +72,55 @@ def test_rejected_upload_joins_the_wrapped_message_into_one_line():
     assert "\n" not in f.cause
 
 
-def test_timeout_reports_the_time_limit_not_the_cancellation_it_causes():
+def test_timeout_waiting_on_apisec_is_not_blamed_on_the_repository():
+    # The fixture analyzed for 4 minutes, then sat in the question poll until the 30-minute limit.
     f = sf.analyze_job(
         _failure(conclusion="cancelled", failed_steps=()), _annotations("timeout"), _log("timeout")
     )
+    assert f.category == "apisec-verification-wait"
+    assert f.cause == (
+        "Analysis finished in 4 min, then the job waited 26 min on APIsec (Question poll timed out "
+        "after 900s) until it hit the time limit: The job has exceeded the maximum execution time of 30m0s"
+    )
+    assert "do not exclude it" in f.hint
+    assert f.context
+
+
+def test_timeout_reports_the_time_limit_not_the_cancellation_it_causes():
+    log = [x for x in _log("timeout") if "Question poll" not in x]
+    f = sf.analyze_job(_failure(conclusion="cancelled", failed_steps=()), _annotations("timeout"), log)
     assert f.category == "timeout"
     assert f.cause == "The job has exceeded the maximum execution time of 30m0s"
     assert f.context
+
+
+def test_error_split_over_several_lines_is_joined():
+    # GitHub writes a multi-line error as one ##[error] line, and one annotation, per line of the
+    # message. setup-python prints it inside a group it never closes.
+    steps = ("Run actions/setup-python@v5",)
+    f = sf.analyze_job(
+        _failure(kind="plan", failed_steps=steps),
+        _annotations("setup_python_split"),
+        _log("setup_python_split"),
+    )
+    assert f.cause == "mkdir: /Users/runner: Permission denied"
+    assert f.category == "runner-setup"
+    assert f.context
+
+
+def test_error_messages_keep_separate_errors_apart():
+    lines = [
+        "##[error]first problem",
+        "output",
+        "##[error]second problem",
+        "##[error]Process completed with exit code 1.",
+    ]
+    assert sf.error_messages(lines) == [
+        "first problem",
+        "second problem",
+        "Process completed with exit code 1.",
+    ]
+    assert sf.error_messages(["##[error]Error: one", "##[error]  two"]) == ["Error: one two"]
 
 
 def test_job_that_never_started_is_explained_from_annotations_alone():
@@ -433,7 +475,19 @@ def test_end_to_end_bundle(tmp_path, capsys):
     counts = {}
     for row in rows:
         counts[row["category"]] = counts.get(row["category"], 0) + 1
-    assert counts == {"billing": 43, "timeout": 1, "manifest-too-large": 1, "analysis-crash": 1}
+    assert counts == {
+        "billing": 43,
+        "apisec-verification-wait": 1,
+        "manifest-too-large": 1,
+        "analysis-crash": 1,
+    }
+    # What APIsec has to look at comes first; billing, which needs no investigation, comes last.
+    assert [r["category"] for r in rows][:3] == [
+        "apisec-verification-wait",
+        "manifest-too-large",
+        "analysis-crash",
+    ]
+    assert rows[-1]["category"] == "billing"
     assert all(row["cause"] for row in rows)
 
     data = json.loads((bundle / "failures.json").read_text())
@@ -450,6 +504,11 @@ def test_end_to_end_bundle(tmp_path, capsys):
     summary = (bundle / "summary.md").read_text(encoding="utf-8")
     assert "### analysis-crash (1)" in summary
     assert "Analysis failed: substring not found" in summary
+    # 43 identical billing failures are listed once, not given 43 identical sections.
+    assert "All 43 failed with: The job was not started" in summary
+    assert "### billing: 43 jobs, same cause" in summary
+    assert summary.count(": billing\n") == 0
+    assert summary.count("account payments have failed") == 3  # table header, cause, annotation
     assert "Send this file to APIsec" in capsys.readouterr().out
 
 

@@ -36,11 +36,11 @@ It prints a count of failures by category and the path of the zip:
 
 ```
 Run 123456 (2026-10-21, failure): 157 repos, 46 failed jobs
-  billing              29
-  manifest-too-large   7
-  timeout              6
-  analysis-crash       3
-  apisec-server-error  1
+  billing                   29
+  manifest-too-large        7
+  apisec-verification-wait  6
+  analysis-crash            3
+  apisec-server-error       1
 
 Summary: ./surface-failures-acme-apisec-scan-20261028-182922/summary.md
 Send this file to APIsec: ./surface-failures-acme-apisec-scan-20261028-182922.zip
@@ -67,7 +67,7 @@ Exit codes: `0` bundle written (whether or not jobs failed), `2` bad arguments o
 
 | File | |
 |---|---|
-| `summary.md` | Runs, failures grouped by category with what to do, then each failure in detail |
+| `summary.md` | Runs, failures grouped by category with what to do, then each failure in detail. Failures APIsec has to look at come first |
 | `failures.csv` | One row per failed job |
 | `failures.json` | The same, for tools |
 | `logs/<run>/<repo>.log` | The job log, redacted. Jobs that never started have no log |

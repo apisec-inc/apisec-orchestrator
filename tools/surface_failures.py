@@ -318,27 +318,26 @@ class Step:
 
 def split_steps(lines: list[str]) -> list[Step]:
     """Splits a job log at each `##[group]Run …` header. The header group itself (the script and
-    its env) is skipped, as are nested groups."""
+    its env) is skipped. Groups the step opens itself are kept: actions such as setup-python print
+    their errors inside one that is never closed."""
     steps = [Step("Set up job")]
-    depth = 0
+    in_header = False
     for raw in lines:
         line = strip_ts(raw)
         if line.startswith("##[group]Run "):
             steps.append(Step(line[len("##[group]") :].strip()))
-            depth = 1
+            in_header = True
             continue
         if line.startswith("Post job cleanup."):
             steps.append(Step("Post job cleanup"))
-            depth = 0
-            continue
-        if line.startswith("##[group]"):
-            depth += 1
+            in_header = False
             continue
         if line.startswith("##[endgroup]"):
-            depth = max(0, depth - 1)
+            in_header = False
             continue
-        if depth == 0:
-            steps[-1].output.append(line)
+        if line.startswith("##[group]") or in_header:
+            continue
+        steps[-1].output.append(line)
     return steps
 
 
@@ -357,11 +356,31 @@ _GENERIC_ERRORS = re.compile(
     r"The operation was canceled\.?)$"
 )
 _EXIT_RE = re.compile(r"\(exit (\d+)\)|exit code (\d+)")
+_POLL_RE = re.compile(r"Question poll timed out after \d+s")
+_TIME_LIMIT_RE = re.compile(r"exceeded the maximum execution time|has timed out", re.IGNORECASE)
 _SURFACE_VERSION_RE = re.compile(r"^│?\s*Version:\s*([0-9][\w.+-]*)")
 _CLI_VERSION_RE = re.compile(r"^\s*CLI_VERSION:\s*([0-9][\w.+-]*)")
 _DRY_RUN_RE = re.compile(r"\bdry_run=(\w+)")
 _ANALYZE_RE = re.compile(r"apisec-orgscan scan|apisec-surface\b.*\banalyze")
 _BLOCK_MARKERS = ("Manifest upload failed", "Upload failed", "Error:", "ERROR:")
+
+
+def error_messages(lines: list[str]) -> list[str]:
+    """The `##[error]` messages in step output. GitHub splits a multi-line message into one
+    `##[error]` line each (`mkdir: /Users/runner` then `: Permission denied`); those are joined back."""
+    out: list[str] = []
+    joinable = False
+    for line in lines:
+        if not line.startswith("##[error]"):
+            joinable = False
+            continue
+        text = line[len("##[error]") :].strip()
+        if joinable and text and not _GENERIC_ERRORS.match(text):
+            out[-1] += ("" if text[0] in ":;,.)" else " ") + text
+            continue
+        out.append(text)
+        joinable = bool(text) and not _GENERIC_ERRORS.match(text)
+    return out
 
 
 def _block(lines: list[str], start: int, limit: int = 12) -> str:
@@ -402,7 +421,7 @@ def analyze_cause(step: Step) -> tuple[str, list[str], int | None]:
     if not cause and context:
         cause = context[-1]
     if not cause and first_error < len(lines):
-        cause = lines[first_error][len("##[error]") :].strip()
+        cause = error_messages(lines[first_error:])[0]
     return cause, context, exit_code
 
 
@@ -440,6 +459,13 @@ RULES = [
         "GitHub did not start the job because the org's Actions billing or spending limit blocked it. "
         "Fix it under Settings > Billing and plans, then re-run the workflow.",
         pattern=r"account payments have failed|spending limit",
+    ),
+    Rule(
+        "apisec-verification-wait",
+        "Surface finished analyzing, then the job ran out of time waiting for APIsec to send its "
+        "verification questions. This is a delay on APIsec's side, not a problem with the repository, "
+        "so do not exclude it. Re-run the workflow; if it repeats, send this bundle to APIsec.",
+        pattern=r"Question poll timed out",
     ),
     Rule(
         "timeout",
@@ -742,6 +768,42 @@ def job_kind(name: str) -> tuple[str, str]:
     return "other", ""
 
 
+def _duration(start: str, end: str) -> str:
+    fmt = "%Y-%m-%dT%H:%M:%S"
+    seconds = (datetime.strptime(end[:19], fmt) - datetime.strptime(start[:19], fmt)).total_seconds()
+    return f"{seconds:.0f} s" if seconds < 60 else f"{seconds / 60:.0f} min"
+
+
+def verification_wait(log: list[str], time_limit: str) -> str:
+    """The cause of a scan that hit the job's time limit while waiting for APIsec's verification
+    questions, with how long it analyzed and how long it waited; "" if that is not what happened."""
+    start = saved = end = poll = ""
+    for raw in log:
+        stamp = _TS_RE.match(raw)
+        line = raw[stamp.end() :] if stamp else raw
+        if line.startswith("Post job cleanup."):
+            break
+        ts = stamp.group(0).strip() if stamp else ""
+        if not start and line.startswith("##[group]Run ") and _ANALYZE_RE.search(line):
+            start = ts
+        elif start and not saved and "Manifest saved" in line:
+            saved = ts
+        if start and not poll:
+            match = _POLL_RE.search(line)
+            poll = match.group(0) if match else ""
+        if start:
+            end = ts or end
+    if not poll:
+        return ""
+    if start and saved and end:
+        analyzed, waited = _duration(start, saved), _duration(saved, end)
+        return (
+            f"Analysis finished in {analyzed}, then the job waited {waited} on APIsec ({poll}) "
+            f"until it hit the time limit: {time_limit}"
+        )
+    return f"{poll}, then the job hit the time limit: {time_limit}"
+
+
 def analyze_job(f: Failure, annotations: list[dict], log: list[str] | None) -> Failure:
     """Fills in cause, category and hint from what GitHub recorded for the job."""
     exit_codes: list[int] = []
@@ -764,11 +826,7 @@ def analyze_job(f: Failure, annotations: list[dict], log: list[str] | None) -> F
         steps = split_steps(log)
         analyze_steps = [s for s in steps if _ANALYZE_RE.search(s.title)]
         for step in steps:
-            for line in step.output:
-                if line.startswith("##[error]"):
-                    message = line[len("##[error]") :].strip()
-                    if message and not _GENERIC_ERRORS.match(message):
-                        errors.append(message)
+            errors += [m for m in error_messages(step.output) if m and not _GENERIC_ERRORS.match(m)]
         for raw in log:
             line = strip_ts(raw)
             if not f.surface_version:
@@ -792,6 +850,8 @@ def analyze_job(f: Failure, annotations: list[dict], log: list[str] | None) -> F
         # A timeout or cancellation also leaves "The operation was canceled." in the step output;
         # the annotation says why.
         cause = special
+        if log is not None and _TIME_LIMIT_RE.search(special):
+            cause = verification_wait(log, special) or special
     if not cause:
         cause = own or (errors[0] if errors else "") or (f.annotations[0] if f.annotations else "")
     if not context and log is not None:
@@ -986,6 +1046,23 @@ def _label(f: Failure) -> str:
     return {"plan": "(Plan job)", "update-store": "(Update store job)"}.get(f.kind, f.job_name)
 
 
+# Shown last: they need no investigation, and many jobs share one cause.
+_SHOWN_LAST = ("billing", "run-cancelled", "cancelled")
+
+
+def _category_rank(f: Failure) -> tuple[int, int]:
+    """Failures APIsec has to look at first, then ones the customer can fix, then the rest."""
+    order = [r.category for r in RULES]
+    index = order.index(f.category) if f.category in order else len(order)
+    if f.category in _SHOWN_LAST:
+        return 2, index
+    return (0 if "bundle to APIsec" in f.hint else 1), index
+
+
+def _same_cause(items: list[Failure]) -> bool:
+    return len(items) > 1 and len({f.cause for f in items}) == 1
+
+
 def write_bundle(
     out_dir: Path,
     repo: str,
@@ -1020,8 +1097,7 @@ def write_bundle(
             f.log_file = rel
     problems = [redact(p) for p in problems]
 
-    order = {r.category: i for i, r in enumerate(RULES)}
-    failures.sort(key=lambda f: (order.get(f.category, len(RULES)), f.run_id, _label(f).lower()))
+    failures.sort(key=lambda f: (_category_rank(f), f.run_id, _label(f).lower()))
 
     records = []
     for f in failures:
@@ -1115,15 +1191,51 @@ def _summary(repo, runs, failures, problems, redact, now) -> str:
         by_category.setdefault(f.category, []).append(f)
     for category, items in by_category.items():
         out += [f"### {category} ({len(items)})", "", items[0].hint, ""]
-        out += ["| Repository | Cause | Exit | Log |", "|---|---|---|---|"]
+        same = _same_cause(items)
+        if same:
+            out += [f"All {len(items)} failed with: {_md(items[0].cause)[:300]}", ""]
+            out += ["| Repository | Exit | Log |", "|---|---|---|"]
+        else:
+            out += ["| Repository | Cause | Exit | Log |", "|---|---|---|---|"]
         for f in items:
             log = f"[log]({f.log_file})" if f.log_file else f.log_status or "-"
             exit_code = "" if f.exit_code is None else str(f.exit_code)
-            out.append(f"| [{_md(_label(f))}]({f.job_url}) | {_md(f.cause)[:300]} | {exit_code} | {log} |")
+            cause = "" if same else f" {_md(f.cause)[:300]} |"
+            out.append(f"| [{_md(_label(f))}]({f.job_url}) |{cause} {exit_code} | {log} |")
         out.append("")
     if failures:
         out += ["## Details", ""]
-    for f in failures:
+    for category, items in by_category.items():
+        if _same_cause(items) and not any(f.context for f in items):
+            # Nothing differs between these jobs but their names, so they share one section.
+            f = items[0]
+            out += [
+                f"### {category}: {len(items)} jobs, same cause",
+                "",
+                f"- What to do: {f.hint}",
+                "",
+                "Jobs:",
+                "",
+            ]
+            out += [
+                f"- [{_md(_label(x))}]({x.job_url}) · run {x.run_id}, attempt {x.run_attempt} · "
+                f"{x.conclusion} · log: {x.log_file or x.log_status or '-'}"
+                for x in items
+            ]
+            out += ["", "Cause:", "", *_fence([f.cause])]
+            if f.annotations:
+                out += ["", "Annotations:", ""] + [f"- {_md(a)}" for a in f.annotations]
+            out.append("")
+            continue
+        out += _details(items)
+    if problems:
+        out += ["## Collection problems", "", *[f"- {_md(p)}" for p in problems], ""]
+    return "\n".join(out)
+
+
+def _details(items: list[Failure]) -> list[str]:
+    out: list[str] = []
+    for f in items:
         out += [
             f"### {_md(_label(f))}: {f.category}",
             "",
@@ -1146,9 +1258,7 @@ def _summary(repo, runs, failures, problems, redact, now) -> str:
         if f.annotations:
             out += ["", "Annotations:", ""] + [f"- {_md(a)}" for a in f.annotations]
         out.append("")
-    if problems:
-        out += ["## Collection problems", "", *[f"- {_md(p)}" for p in problems], ""]
-    return "\n".join(out)
+    return out
 
 
 # =============================================================================
