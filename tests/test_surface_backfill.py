@@ -20,7 +20,10 @@ sys.modules["surface_backfill"] = sb
 _spec.loader.exec_module(sb)
 
 REPO = "acme/apisec-scan"
-CALLER = (ROOT / "templates/apisec-scan.yml").read_text()
+# Without queue: max, whether or not the template has it: GitHub keeps one run waiting at most.
+CALLER = re.sub(r"\n[ \t]+queue:[^\n]*", "", (ROOT / "templates/apisec-scan.yml").read_text())
+QUEUED = CALLER.replace("  cancel-in-progress: false\n", "  cancel-in-progress: false\n  queue: max\n")
+assert QUEUED != CALLER
 OLD_CALLER = CALLER.replace(
     "      throughput:\n        description: Max parallel scans (0 = THROUGHPUT variable, else 2)\n"
     "        type: number\n        default: 0\n",
@@ -44,6 +47,7 @@ class FakeGitHub:
         self.return_run_id = True
         self.push = True
         self.variable_status = None
+        self.queue_honoured = True  # False: GitHub cancels the pending run when another is started
         for run_id in active:
             self.runs[run_id] = {"id": run_id, "status": "in_progress", "event": "schedule", "polls": 2}
 
@@ -82,6 +86,10 @@ class FakeGitHub:
             runs = [self.public(r) for r in sorted(self.runs.values(), key=lambda r: -r["id"])]
             if "event=workflow_dispatch" in path:
                 runs = [r for r in runs if r["event"] == "workflow_dispatch"]
+            status = re.search(r"[?&]status=(\w+)", path)
+            if status:
+                total = sum(1 for r in runs if r["status"] == status.group(1))
+                return {"total_count": total, "workflow_runs": runs[:1]}
             return {"total_count": len(runs), "workflow_runs": runs}
         m = re.search(r"actions/runs/(\d+)/jobs", path)
         if m:
@@ -94,9 +102,13 @@ class FakeGitHub:
         return 1, b"", f"gh: Not Found (HTTP 404) {path}"
 
     def dispatch(self, body):
-        assert not any(r["status"] != "completed" for r in self.runs.values()), (
-            "dispatched while a run was active"
-        )
+        active = [r for r in self.runs.values() if r["status"] != "completed"]
+        if not sb.queues_runs(self.workflow_text):
+            assert not active, "dispatched while a run was active"
+        elif not self.queue_honoured:
+            for r in active:
+                if r["status"] == "queued":
+                    r["status"], r["conclusion"] = "completed", "cancelled"
         run_id = self.next_id
         self.next_id += 1
         self.dispatches.append(body["inputs"])
@@ -116,7 +128,7 @@ class FakeGitHub:
             "id": run["id"],
             "status": run["status"],
             "event": run["event"],
-            "conclusion": "success" if run["status"] == "completed" else None,
+            "conclusion": run.get("conclusion", "success") if run["status"] == "completed" else None,
             "html_url": f"https://github.com/{REPO}/actions/runs/{run['id']}",
             "created_at": "2026-10-28T00:00:00Z",
             "run_started_at": "2026-10-28T00:00:00Z",
@@ -323,3 +335,70 @@ def test_an_interrupted_series_restores_the_original_value_later(monkeypatch):
     assert run(fake, "--batch", "2", "--restore-throughput") == 0
     assert fake.variables["THROUGHPUT"] == "3"
     assert json.loads(Path("surface-backfill-state.json").read_text())["throughput_var"]["restored"] is True
+
+
+# =============================================================================
+# Workflows with queue: max
+# =============================================================================
+
+
+def test_queue_max_is_read_from_the_workflows_own_concurrency():
+    assert sb.queues_runs(QUEUED)
+    assert not sb.queues_runs(CALLER)
+    assert sb.queues_runs("concurrency:\n  group: g\n  # note\n  queue: 'max'  # wait\njobs: {}\n")
+    assert not sb.queues_runs("concurrency: apisec-surface-scan\n")
+    # A job's concurrency does not queue runs of the workflow.
+    assert not sb.queues_runs("concurrency:\n  group: g\njobs:\n  a:\n    concurrency:\n      queue: max\n")
+
+
+def test_queued_runs_are_all_started_at_once_and_the_script_exits(capsys):
+    fake = FakeGitHub(workflow_text=QUEUED, active=(42,))
+    start = fake.time
+    assert run(fake, "--batch", "100x10", "--yes") == 0
+    assert fake.dispatches == [{"max_repos": "100", "dry_run": "false"}] * 10
+    assert sorted(fake.runs) == [42, *range(100, 110)]
+    assert (fake.time - start).total_seconds() < 60  # did not wait for any run
+    assert "close this window" in capsys.readouterr().out
+    log = json.loads(Path("surface-backfill-runs.json").read_text())
+    assert [r["run_id"] for r in log[-1]["runs"]] == list(range(100, 110))
+
+
+def test_queued_runs_get_their_own_parallel_through_the_input():
+    fake = FakeGitHub(workflow_text=QUEUED)
+    assert run(fake, "--batch", "50:2,100:4", "--yes") == 0
+    assert [d["throughput"] for d in fake.dispatches] == ["2", "4"]
+    assert not any("actions/variables" in path for _, path, _ in fake.calls)
+
+
+def test_queued_runs_cannot_take_parallel_from_the_variable(capsys):
+    old_queued = OLD_CALLER.replace(
+        "  cancel-in-progress: false\n", "  cancel-in-progress: false\n  queue: max\n"
+    )
+    fake = FakeGitHub(workflow_text=old_queued)
+    assert run(fake, "--batch", "100:4x3", "--yes") == 2
+    assert not fake.dispatches
+    assert "--one-at-a-time" in capsys.readouterr().err
+    assert run(fake, "--batch", "100x3", "--yes") == 0
+    assert len(fake.dispatches) == 3
+
+
+def test_runs_github_cancelled_instead_of_queuing_are_reported(capsys):
+    fake = FakeGitHub(workflow_text=QUEUED)
+    fake.queue_honoured = False
+    assert run(fake, "--batch", "100x3", "--yes") == 1
+    err = capsys.readouterr().err
+    assert "cancelled 2 of the queued runs" in err
+    assert "--one-at-a-time" in err
+
+
+def test_one_at_a_time_overrides_queueing():
+    fake = FakeGitHub(workflow_text=QUEUED, scans=(2, 0, 2))
+    assert run(fake, "--batch", "2x3", "--yes", "--one-at-a-time") == 0
+    assert len(fake.dispatches) == 2  # stopped early, which queueing cannot do
+
+
+def test_queue_is_limited_to_100_runs(capsys):
+    fake = FakeGitHub(workflow_text=QUEUED, active=range(1, 96))
+    assert run(fake, "--batch", "100x10", "--yes") == 2
+    assert not fake.dispatches
+    assert "at most 5" in capsys.readouterr().err

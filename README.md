@@ -45,8 +45,13 @@ Self-hosted runners need Python 3.10+, git, and outbound access to GitHub, PyPI 
 
 [`tools/surface_backfill.py`](tools/surface_backfill.py) runs the workflow several times in a row
 from your machine with the GitHub CLI, each run with its own **max_repos** and parallel scans. Each
-run starts when the previous one has finished, so it skips what the previous run scanned. The series
-stops early once there is nothing left to scan.
+run starts when the previous one has finished, so it skips what the previous run scanned.
+
+If your workflow's `concurrency` has `queue: max`, the script queues every run at once and exits;
+GitHub starts each when the previous one has finished, so your machine can be switched off. Without
+it, GitHub keeps only one run waiting and cancels it when another is started, so the script starts
+each run itself and must keep running until the series ends. It then stops early once there is
+nothing left to scan.
 
 ```
 python3 surface_backfill.py OWNER/REPO --batch 25:2,100:4,200:6x5 --preview   # show the plan
@@ -55,13 +60,14 @@ python3 surface_backfill.py OWNER/REPO --batch 25:2,100:4,200:6x5             # 
 
 A batch is `MAX_REPOS[:PARALLEL][xCOUNT]`: `200:6x5` is five runs of up to 200 repositories, 6 at a
 time. It needs Python 3.9+ and `gh` logged in with write access to OWNER/REPO, the repository that
-runs this workflow. Keep it running until the series ends. Runs that are already going continue on
-GitHub if it stops, and you can run it again with the batches that are left.
+runs this workflow. If it stops before the series ends, runs that are already going continue on
+GitHub, and you can run it again with the batches that are left.
 
 PARALLEL is passed as the workflow's **throughput** input. Workflows made from an older template
 have no such input; for them, the script sets the repository variable `THROUGHPUT` for each run
 and restores it at the end, which requires admin access. If the script is interrupted before
-restoring it, run it again with `--restore-throughput`.
+restoring it, run it again with `--restore-throughput`. Queued runs read the variable when they
+start, so with `queue: max` and no throughput input, leave PARALLEL out.
 
 ## Updates
 

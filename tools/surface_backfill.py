@@ -2,16 +2,21 @@
 """Run the APIsec Surface org scan several times in a row, to scan a large organization in batches.
 
 Each batch is one run of the "APIsec Surface org scan" workflow with its own maximum number of
-repositories and parallel scans. Runs are started one after another: each starts when the previous
-one has finished, so the next run skips the repositories the previous one scanned. The series stops
-early once a run finds nothing left to scan.
+repositories and parallel scans. Each run starts when the previous one has finished, so it skips the
+repositories the previous one scanned.
+
+If the workflow's concurrency has `queue: max`, every run is queued at once and the script exits:
+GitHub starts them one after another, and this machine can be switched off. Otherwise GitHub keeps
+only one run waiting and cancels it when another is started, so the script starts each run itself
+when the previous one has finished, and stops early once a run finds nothing left to scan.
 
     python3 surface_backfill.py OWNER/REPO --batch 25:2 --batch 100:4 --batch 200:6x3
     python3 surface_backfill.py OWNER/REPO --batch 25:2,100:4,200:6x3 --preview
 
 A batch is MAX_REPOS[:PARALLEL][xCOUNT]: `200:6x3` is three runs of up to 200 repositories, 6 at a
-time. OWNER/REPO is the repository that runs the org-scan workflow. Keep the command running until
-the series ends; if it is interrupted, run it again with the batches that are left.
+time. OWNER/REPO is the repository that runs the org-scan workflow. Without `queue: max`, keep the
+command running until the series ends; if it is interrupted, run it again with the batches that are
+left.
 
 Needs Python 3.9+ and gh (https://cli.github.com), logged in with an account that can run workflows
 in OWNER/REPO. No other dependencies.
@@ -247,6 +252,26 @@ def dispatch_inputs(text: str) -> set[str]:
     return set()
 
 
+def queues_runs(text: str) -> bool:
+    """Whether the workflow's own concurrency lets runs wait in line (`queue: max`).
+
+    Without it GitHub keeps one run pending per concurrency group, and starting another cancels it.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not re.match(r"^concurrency:\s*(?:#.*)?$", line):
+            continue
+        for raw in lines[i + 1 :]:
+            if not raw.strip() or raw.lstrip().startswith("#"):
+                continue
+            if not raw[0].isspace():
+                return False
+            if re.match(r"^\s+queue:\s*['\"]?max['\"]?\s*(?:#.*)?$", raw):
+                return True
+        return False
+    return False
+
+
 def workflow_text(gh: Gh, repo: str, workflow: dict, ref: str) -> str:
     data = gh.json(f"repos/{repo}/contents/{quote(workflow['path'])}?ref={quote(ref)}") or {}
     return base64.b64decode(data.get("content", "")).decode("utf-8", errors="replace")
@@ -446,6 +471,16 @@ class Series:
     def active_runs(self) -> list[dict]:
         return [r for r in self._runs() if r.get("status") in ACTIVE]
 
+    def active_count(self) -> int:
+        """Runs queued or running, counted per status so more than one page of them is not missed."""
+        total = 0
+        for status in sorted(ACTIVE):
+            path = (
+                f"repos/{self.repo}/actions/workflows/{self.workflow['id']}/runs?per_page=1&status={status}"
+            )
+            total += int((self.gh.json(path) or {}).get("total_count") or 0)
+        return total
+
     def wait_until_idle(self) -> None:
         """Waits for runs of the workflow that are already queued or running, e.g. the nightly one.
 
@@ -611,6 +646,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--max-hours", type=float, default=24.0, help="stop waiting for one run after this (default 24)"
     )
+    p.add_argument(
+        "--one-at-a-time",
+        action="store_true",
+        help="start each run when the previous one has finished, even if the workflow queues runs",
+    )
     p.add_argument("--hostname", default="", help="GitHub Enterprise Server host (default github.com)")
     p.add_argument("--state", default="surface-backfill-state.json", help=argparse.SUPPRESS)
     p.add_argument("--restore-throughput", action="store_true", help="only put the THROUGHPUT variable back")
@@ -664,7 +704,8 @@ def _main(args: argparse.Namespace, gh: Gh, clock, stdin) -> int:
     batches = parse_batches(args.batch)
     ref = args.ref or info.get("default_branch") or "main"
     workflow = find_workflow(gh, repo, args.workflow)
-    names = dispatch_inputs(workflow_text(gh, repo, workflow, ref))
+    text = workflow_text(gh, repo, workflow, ref)
+    names = dispatch_inputs(text)
     if "max_repos" not in names:
         raise UsageError(
             f"{workflow.get('path')} on {ref} has no max_repos input to run in batches. Update it from "
@@ -672,11 +713,26 @@ def _main(args: argparse.Namespace, gh: Gh, clock, stdin) -> int:
         )
     use_input = "throughput" in names
     wants_parallel = any(b.throughput is not None for b in batches)
+    queued = queues_runs(text) and not args.one_at_a_time
+    if queued and wants_parallel and not use_input:
+        raise UsageError(
+            f"{workflow.get('path')} has no throughput input, so queued runs cannot each get their own "
+            f"PARALLEL: they all use the THROUGHPUT variable when they start. Leave PARALLEL out of the "
+            f"batches, add the throughput input (see templates/apisec-scan.yml), or pass --one-at-a-time."
+        )
     if wants_parallel and not use_input:
         var.load()
 
     print(f"{workflow.get('name')} ({workflow.get('path')}) in {repo}, branch {ref}")
-    print(f"{len(batches)} run(s), one after another; the series stops early when nothing is left to scan:")
+    if queued:
+        print(
+            f"{len(batches)} run(s), all queued now; GitHub runs them one after another (queue: max). "
+            f"Runs that find nothing left to scan finish in about a minute:"
+        )
+    else:
+        print(
+            f"{len(batches)} run(s), one after another; the series stops early when nothing is left to scan:"
+        )
     for i, b in enumerate(batches, 1):
         repos = "all remaining" if b.max_repos == 0 else f"up to {b.max_repos}"
         parallel = f"{b.throughput} at a time" if b.throughput else "THROUGHPUT variable's parallel scans"
@@ -705,6 +761,8 @@ def _main(args: argparse.Namespace, gh: Gh, clock, stdin) -> int:
             return EXIT_OK
 
     series = Series(gh, repo, workflow, ref, poll=max(5.0, args.poll), say=_say, clock=clock)
+    if queued:
+        return _queue(series, batches, names, args.dry_run, repo, gh)
     results: list[RunResult] = []
     code = EXIT_OK
     first_start = clock()
@@ -714,14 +772,9 @@ def _main(args: argparse.Namespace, gh: Gh, clock, stdin) -> int:
             result = RunResult(batch=i, max_repos=b.max_repos, throughput=b.throughput)
             results.append(result)
             series.wait_until_idle()
-            inputs = {"max_repos": str(b.max_repos)}
-            if "dry_run" in names:
-                inputs["dry_run"] = "true" if args.dry_run else "false"
-            if b.throughput is not None:
-                if use_input:
-                    inputs["throughput"] = str(b.throughput)
-                else:
-                    var.set(b.throughput)
+            inputs = _inputs(b, names, args.dry_run)
+            if b.throughput is not None and not use_input:
+                var.set(b.throughput)
             result.run_id = series.dispatch(inputs)
             result.url = f"https://{gh.hostname or 'github.com'}/{repo}/actions/runs/{result.run_id}"
             _say(f"{label} started: {result.url}")
@@ -772,6 +825,63 @@ def _main(args: argparse.Namespace, gh: Gh, clock, stdin) -> int:
             )
     _report(repo, results, first_start)
     return code
+
+
+def _inputs(b: Batch, names: set[str], dry_run: bool) -> dict[str, str]:
+    inputs = {"max_repos": str(b.max_repos)}
+    if "dry_run" in names:
+        inputs["dry_run"] = "true" if dry_run else "false"
+    if b.throughput is not None and "throughput" in names:
+        inputs["throughput"] = str(b.throughput)
+    return inputs
+
+
+def _queue(series: Series, batches: list[Batch], names: set[str], dry_run: bool, repo: str, gh: Gh) -> int:
+    """Queues every run at once, for a workflow whose concurrency has `queue: max`."""
+    waiting = series.active_count()
+    if waiting + len(batches) > 100:
+        raise UsageError(
+            f"GitHub queues at most 100 runs and {waiting} are already queued or running. "
+            f"Queue at most {100 - waiting} now."
+        )
+    results: list[RunResult] = []
+    try:
+        for i, b in enumerate(batches, 1):
+            result = RunResult(batch=i, max_repos=b.max_repos, throughput=b.throughput, conclusion="queued")
+            result.run_id = series.dispatch(_inputs(b, names, dry_run))
+            result.url = f"https://{gh.hostname or 'github.com'}/{repo}/actions/runs/{result.run_id}"
+            results.append(result)
+            _say(f"Run {i}/{len(batches)} queued: {result.url}")
+        # A run that cannot wait in line is cancelled at once, e.g. if queue: max is not in effect.
+        gh.sleep(10)
+        cancelled = []
+        for r in results:
+            try:
+                if (gh.json(f"repos/{repo}/actions/runs/{r.run_id}") or {}).get("conclusion") == "cancelled":
+                    cancelled.append(r)
+            except GhError as exc:
+                _say(f"Could not check run {r.run_id} ({exc}); look at the Actions tab to see that it waits.")
+    except KeyboardInterrupt:
+        _say("Interrupted. The runs queued so far stay queued; see them in the Actions tab.")
+        _write_log(results)
+        return EXIT_INTERRUPTED
+    _write_log(results)
+    if cancelled:
+        for r in cancelled:
+            r.conclusion = "cancelled"
+        _say(
+            f"GitHub cancelled {len(cancelled)} of the queued runs, so this workflow does not let runs wait "
+            f"in line. Check its concurrency setting, or run this again with --one-at-a-time."
+        )
+        return EXIT_STOPPED
+    workflow = series.workflow.get("name") or WORKFLOW_NAME
+    print("")
+    print(f"{len(results)} run(s) queued. GitHub starts each when the previous one has finished; you can")
+    print("close this window. To follow them, or to cancel the ones still waiting:")
+    print(f'  gh run list -R {repo} -w "{workflow}"')
+    print(f'  gh run list -R {repo} -w "{workflow}" -s pending --json databaseId -q ".[].databaseId" |')
+    print(f"    xargs -n1 gh run cancel -R {repo}")
+    return EXIT_OK
 
 
 def _report(repo: str, results: list[RunResult], since: datetime) -> None:
