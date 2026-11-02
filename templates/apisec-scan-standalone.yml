@@ -25,7 +25,7 @@ on:
         type: number
         default: 0
       runner:
-        description: github-hosted | self-hosted (blank = ORCHESTRATOR_RUNNER variable)
+        description: github-hosted | self-hosted | a runner label (blank = ORCHESTRATOR_RUNNER variable)
         type: string
         default: ''
       run_profile:
@@ -47,7 +47,7 @@ env:
 jobs:
   plan:
     name: Plan
-    runs-on: ${{ (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'self-hosted' && fromJSON('["self-hosted","apisec"]') || 'ubuntu-latest' }}
+    runs-on: ${{ ((inputs.runner || vars.ORCHESTRATOR_RUNNER) == '' || (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'github-hosted') && 'ubuntu-latest' || (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'self-hosted' && fromJSON('["self-hosted","apisec"]') || (inputs.runner || vars.ORCHESTRATOR_RUNNER) }}
     timeout-minutes: 20
     outputs:
       count: ${{ steps.plan.outputs.count }}
@@ -106,7 +106,7 @@ jobs:
     name: Scan ${{ matrix.repo_name }}
     needs: plan
     if: needs.plan.outputs.count != '0'
-    runs-on: ${{ (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'self-hosted' && fromJSON('["self-hosted","apisec"]') || 'ubuntu-latest' }}
+    runs-on: ${{ ((inputs.runner || vars.ORCHESTRATOR_RUNNER) == '' || (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'github-hosted') && 'ubuntu-latest' || (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'self-hosted' && fromJSON('["self-hosted","apisec"]') || (inputs.runner || vars.ORCHESTRATOR_RUNNER) }}
     timeout-minutes: 60
     strategy:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -148,7 +148,6 @@ jobs:
           REPO_NAME: ${{ matrix.repo_name }}
           REPO_ID: ${{ matrix.repo_id }}
           REPO_FULL_NAME: ${{ matrix.repo_full_name }}
-          SCANNED_BEFORE: ${{ matrix.scanned_before }}
           APISEC_PAT: ${{ secrets.APISEC_TOKEN }}
           APISEC_ENDPOINT: ${{ vars.APISEC_ENDPOINT }}
           APISEC_LLM_ENRICHMENT: ${{ vars.APISEC_LLM_ENRICHMENT }}
@@ -173,7 +172,7 @@ jobs:
     name: Update store
     needs: [plan, scan]
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0'
-    runs-on: ${{ (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'self-hosted' && fromJSON('["self-hosted","apisec"]') || 'ubuntu-latest' }}
+    runs-on: ${{ ((inputs.runner || vars.ORCHESTRATOR_RUNNER) == '' || (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'github-hosted') && 'ubuntu-latest' || (inputs.runner || vars.ORCHESTRATOR_RUNNER) == 'self-hosted' && fromJSON('["self-hosted","apisec"]') || (inputs.runner || vars.ORCHESTRATOR_RUNNER) }}
     timeout-minutes: 15
     steps:
       - uses: actions/setup-python@v5

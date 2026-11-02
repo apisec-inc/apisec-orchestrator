@@ -115,4 +115,16 @@ def test_scan_names_the_repo_it_checked_out():
     analyze = next(s for s in _load(WORKFLOW)["jobs"]["scan"]["steps"] if s.get("name") == "Analyze")
     assert '--repo-full-name "$REPO_FULL_NAME"' in analyze["run"]
     assert analyze["env"]["REPO_FULL_NAME"] == "${{ matrix.repo_full_name }}"
-    assert analyze["env"]["SCANNED_BEFORE"] == "${{ matrix.scanned_before }}"
+
+
+def test_every_job_runs_on_the_runner_the_caller_chose():
+    # Blank or github-hosted: GitHub's runners; self-hosted: runners labelled
+    # self-hosted + apisec; anything else is one runner label (e.g. a larger runner).
+    r = "(inputs.runner || vars.ORCHESTRATOR_RUNNER)"
+    expected = (
+        f"${{{{ ({r} == '' || {r} == 'github-hosted') && 'ubuntu-latest' "
+        f"|| {r} == 'self-hosted' && fromJSON('[\"self-hosted\",\"apisec\"]') || {r} }}}}"
+    )
+    for path in (WORKFLOW, STANDALONE):
+        for name, job in _load(path)["jobs"].items():
+            assert job["runs-on"] == expected, f"{path.name}:{name}"

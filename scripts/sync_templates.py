@@ -44,7 +44,7 @@ on:
         type: number
         default: 0
       runner:
-        description: github-hosted | self-hosted (blank = ORCHESTRATOR_RUNNER variable)
+        description: github-hosted | self-hosted | a runner label (blank = ORCHESTRATOR_RUNNER variable)
         type: string
         default: ''
       run_profile:

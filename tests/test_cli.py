@@ -1,10 +1,11 @@
 import argparse
 import json
+import urllib.request
 from pathlib import Path
 
 import pytest
 
-from apisec_orgscan import apisec, cli, repos, settings, store
+from apisec_orgscan import cli, repos, settings, store
 
 ORG_REPOS = [
     {"id": 1, "full_name": "acme/api", "name": "api", "pushed_at": "2026-10-02T00:00:00Z", "size": 5},
@@ -116,14 +117,13 @@ def ran(monkeypatch):
     return calls
 
 
-def _scan(env, full_name=""):
+def _scan(env, full_name="acme/api"):
     return cli.cmd_scan(argparse.Namespace(path="repos/api", repo_id="42", repo_full_name=full_name), env)
 
 
-def test_scan_without_repo_name_keeps_numeric_repo_id(ran):
-    # A workflow from before 1.1 does not pass --repo-full-name.
+def test_scan_runs_surface_with_settings(ran):
     env = {"APISEC_ENDPOINT": "https://api.example", "APISEC_PAT": "t", "RUN_PROFILE": "legacy"}
-    assert _scan(env) == 0
+    assert _scan(env, "acme/api") == 0
     cmd, child = ran[0]
     assert cmd == [
         "apisec-surface",
@@ -134,16 +134,17 @@ def test_scan_without_repo_name_keeps_numeric_repo_id(ran):
         "--api-url",
         "https://api.example",
     ]
-    assert child["APISEC_CANONICAL_REPO_ID"] == "github:42"
     assert child["APISEC_RUN_PROFILE"] == "legacy"
     assert child["APISEC_REGISTRATION_CODE"] == "ci-orchestrator"
     assert "APISEC_SURFACE_LLM_EXTRACTION" not in child
 
 
 def test_scan_gives_surface_the_scanned_repo_not_the_host_repo(ran):
+    # Surface identifies the repo as github:<owner>/<repo> from GITHUB_REPOSITORY;
+    # an explicit repo id would override it.
     env = {
         "APISEC_ENDPOINT": "https://a",
-        "DRY_RUN": "true",
+        "APISEC_PAT": "t",
         "GITHUB_REPOSITORY": "acme/apisec-scan",
         "APISEC_CANONICAL_REPO_ID": "github:7",
     }
@@ -153,91 +154,43 @@ def test_scan_gives_surface_the_scanned_repo_not_the_host_repo(ran):
     assert "APISEC_CANONICAL_REPO_ID" not in child
 
 
-@pytest.fixture
-def ids(monkeypatch):
-    """Fake APIsec bindings: canonical id -> app id."""
-    calls, bound = [], {}
-
-    def lookup(endpoint, pat, wanted):
-        calls.append(("lookup", *wanted))
-        return None if bound.get("forbidden") else {i: bound.get(i) for i in wanted}
-
-    def resolve(endpoint, pat, repo, cid):
-        calls.append(("resolve", cid))
-        return bound.setdefault(cid, "app-new")
-
-    def bind(endpoint, pat, repo, cid, app):
-        calls.append(("bind", cid, app))
-        bound.setdefault(cid, app)
-
-    monkeypatch.setattr(apisec, "lookup", lookup)
-    monkeypatch.setattr(apisec, "resolve", resolve)
-    monkeypatch.setattr(apisec, "bind", bind)
-    return calls, bound
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/acme/payments",
+        "https://ghe.example.com/acme/payments.git",
+        "git@github.com:acme/payments",
+    ],
+)
+def test_scan_without_repo_name_reads_it_from_the_checkout(ran, tmp_path, url):
+    # Workflows from before 1.1 do not pass --repo-full-name.
+    cli.subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    cli.subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin", url], check=True)
+    args = argparse.Namespace(path=str(tmp_path), repo_id="42", repo_full_name="")
+    assert cli.cmd_scan(args, {"APISEC_ENDPOINT": "https://a", "APISEC_PAT": "t"}) == 0
+    assert ran[0][1]["GITHUB_REPOSITORY"] == "acme/payments"
 
 
-OLD, NEW = "github:42", "github:acme/payments-api"
-UPLOAD = {"APISEC_ENDPOINT": "https://a", "APISEC_PAT": "t"}
-
-
-def test_existing_numeric_app_gets_the_name_id_before_the_scan(ran, ids):
-    calls, bound = ids
-    bound[OLD] = "app-1"
-    assert _scan(UPLOAD, "acme/Payments-API") == 0
-    assert calls == [("lookup", OLD, NEW), ("bind", NEW, "app-1")]
-    assert bound[NEW] == "app-1"
-
-
-def test_new_repo_gets_the_numeric_id_after_the_scan(ran, ids):
-    calls, bound = ids
-    bound[NEW] = "app-2"  # what the CLI registered during the scan
-    assert _scan(UPLOAD, "acme/Payments-API") == 0
-    assert calls == [("lookup", OLD, NEW), ("resolve", NEW), ("bind", OLD, "app-2")]
-
-
-def test_without_lookup_access_a_repo_scanned_before_is_bridged_by_registration(ran, ids):
-    calls, bound = ids
-    bound.update({"forbidden": True, OLD: "app-1"})
-    assert _scan({**UPLOAD, "SCANNED_BEFORE": "true"}, "acme/Payments-API") == 0
-    assert calls[:3] == [("lookup", OLD, NEW), ("resolve", OLD), ("bind", NEW, "app-1")]
-    assert bound[NEW] == "app-1"
-
-
-def test_without_lookup_access_a_new_repo_is_not_registered_before_the_scan(ran, ids):
-    calls, bound = ids
-    bound["forbidden"] = True
-    assert _scan(UPLOAD, "acme/Payments-API") == 0
-    assert ("resolve", OLD) not in calls
-
-
-def test_two_applications_for_one_repo_are_reported(ran, ids, capsys):
-    _, bound = ids
-    bound.update({OLD: "app-1", NEW: "app-2"})
-    assert _scan(UPLOAD, "acme/Payments-API") == 0
-    assert "app-1" in capsys.readouterr().err
-
-
-def test_scan_is_skipped_when_bindings_cannot_be_checked(ran, monkeypatch, capsys):
-    def fail(*_):
-        raise apisec.ApisecError("HTTP 500")
-
-    monkeypatch.setattr(apisec, "lookup", fail)
-    assert _scan(UPLOAD, "acme/Payments-API") == 1
+def test_scan_refuses_a_repo_it_cannot_name(ran, tmp_path, capsys):
+    args = argparse.Namespace(path=str(tmp_path), repo_id="42", repo_full_name="")
+    assert cli.cmd_scan(args, {"APISEC_ENDPOINT": "https://a", "APISEC_PAT": "t"}) == 1
     assert ran == []
-    assert "HTTP 500" in capsys.readouterr().err
+    assert "could not tell which repository" in capsys.readouterr().err
 
 
-def test_dry_run_touches_no_bindings(ran, ids):
-    calls, _ = ids
-    assert _scan({"APISEC_ENDPOINT": "https://a", "DRY_RUN": "true"}, "acme/Payments-API") == 0
-    assert calls == []
+def test_scan_ignores_a_committed_surface_state_file(ran, tmp_path):
+    state = tmp_path / "apisec-code-bolt" / "state.yaml"
+    state.parent.mkdir()
+    state.write_text("applicationId: someone-elses-app\n")
+    args = argparse.Namespace(path=str(tmp_path), repo_id="42", repo_full_name="acme/api")
+    assert cli.cmd_scan(args, {"APISEC_ENDPOINT": "https://a", "APISEC_PAT": "t"}) == 0
+    assert ran and not state.exists()
 
 
-def test_failed_scan_binds_nothing_after(monkeypatch, ids):
-    calls, _ = ids
-    monkeypatch.setattr(cli.subprocess, "call", lambda cmd, env: 2)
-    assert _scan(UPLOAD, "acme/Payments-API") == 2
-    assert calls == [("lookup", OLD, NEW)]
+def test_scan_makes_no_apisec_calls_of_its_own(ran, monkeypatch):
+    # Only the Surface CLI talks to APIsec, so only an upload can create an application.
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_, **__: pytest.fail("called APIsec"))
+    assert _scan({"APISEC_ENDPOINT": "https://a", "APISEC_PAT": "t"}, "acme/api") == 0
 
 
 def test_scan_passes_registration_code_when_set(ran):

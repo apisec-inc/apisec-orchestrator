@@ -54,7 +54,7 @@ access to the org. If both are set, the app is used.
 | Variable | Default | Purpose |
 |---|---|---|
 | `THROUGHPUT` | `2` | Repositories scanned in parallel (1–10) |
-| `ORCHESTRATOR_RUNNER` | `github-hosted` | `self-hosted` runs every job on runners labelled `self-hosted` and `apisec` |
+| `ORCHESTRATOR_RUNNER` | `github-hosted` | `self-hosted` runs every job on runners labelled `self-hosted` and `apisec`; any other value is a runner label, such as a GitHub-hosted larger runner's name |
 | `APISEC_RUN_PROFILE` | `surface` | `legacy` publishes only a committed OpenAPI contract |
 | `TARGET_ORG` | this org | Scan a different org (the GitHub App must be installed there) |
 | `EXCLUDE_REPOS` | | Comma-separated `owner/repo` names to skip |
@@ -62,28 +62,21 @@ access to the org. If both are set, the app is used.
 | `APISEC_REGISTRATION_CODE` | `ci-orchestrator` | Registration code the scanned apps are registered with |
 | `APISEC_CLI_VERSION` | newest 1.x | Pin the Surface CLI to one release, e.g. `1.2.0`, for change control or to hold back a bad release |
 
-Self-hosted runners must run Linux (x64 or arm64) with git, and need outbound access to GitHub, PyPI and
-`APISEC_ENDPOINT`; each job installs its own Python. macOS runners are not supported: there,
-`actions/setup-python` installs Python only under `/Users/runner/hostedtoolcache`.
+Self-hosted runners and larger runners must run Linux (x64 or arm64) with git, and need outbound access
+to GitHub, PyPI and `APISEC_ENDPOINT`, including when a larger runner uses private networking; each job
+installs its own Python. All jobs run on the runner you choose, so allow the repository that runs this
+workflow to use it. macOS runners are not supported: there, `actions/setup-python` installs Python only
+under `/Users/runner/hostedtoolcache`.
 
 ## Applications in APIsec
 
-Each scanned repository has one application in APIsec, found by the repository's id. Scans identify
-a repository as `github:<owner>/<repo>`, the id the Surface CLI uses when it runs in the repository's
-own workflow, so a repository scanned both ways keeps one application. Releases before 1.1 and the
-APIsec GitHub Action use the repository's numeric id, `github:<id>`, so each scan binds both ids to
-the same application:
+Each scanned repository has one application in APIsec, found by the repository's id. Scans identify a
+repository as `github:<owner>/<repo>`, the id the Surface CLI uses when it runs in the repository's own
+workflow, so a repository scanned both ways keeps one application. A scan that uploads nothing creates
+no application.
 
-- Before scanning a repository whose numeric id already has an application, the scan binds the
-  name id to that application. Repositories scanned by earlier releases keep their applications,
-  and so does a repository that is renamed.
-- After uploading, the scan binds the numeric id to the repository's application, so the GitHub
-  Action finds it too.
-
-Looking up a repository's application needs an `APISEC_TOKEN` with the Admin role. With another
-role, only repositories this workflow has uploaded before are matched by numeric id; a repository
-that only the GitHub Action has scanned gets a second application. If a repository already has two
-applications, the run log warns and names both; the scan updates the one bound to its name.
+Releases before 1.1 and the APIsec GitHub Action identify a repository by its numeric id instead. A
+repository scanned that way may have a separate application; ask APIsec to link the two.
 
 ## Updates
 
@@ -102,7 +95,8 @@ arrive without editing it. Setup is otherwise identical.
 
 ## Moving from the zip version
 
-Either way, each repository keeps its application in APIsec (see
+The zip version identified repositories by their numeric id, so a repository it scanned may get a
+second application on the first scan by this workflow; ask APIsec to link them (see
 [Applications in APIsec](#applications-in-apisec)).
 
 - **Start fresh:** delete the old orchestrator repository and follow [Setup](#setup). The first run
