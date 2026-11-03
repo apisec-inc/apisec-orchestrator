@@ -25,31 +25,33 @@ For a first scan of a large org, set **max_repos** (e.g. `100`) and run until th
 
 ### GitHub access
 
-**GitHub App (recommended).** The app belongs to the org rather than to a person, its key does not
-expire, and the repositories selected on its installation are exactly what gets scanned.
+**GitHub App (recommended).** Use the Surface Code GitHub App that connects your org to APIsec. The app
+belongs to the org rather than to a person, its key does not expire, and the repositories selected on
+its installation are what APIsec lists and what gets scanned.
 
-1. Org → Settings → Developer settings → GitHub Apps → **New GitHub App**. Any name and homepage URL;
-   untick **Webhook → Active** (if this is also your Surface Code GitHub App, keep the webhook active
-   and set it up as in the APIsec docs). Repository permissions: **Contents: Read-only** and **Metadata:
-   Read-only**, nothing else. Install only on this account.
-2. **Generate a private key** (a `.pem` file downloads), then **Install App** on the org and choose
-   **All repositories** or the repositories to scan.
-3. Add the variable `ORCHESTRATOR_APP_ID` with the app's App ID or Client ID, and the secret
+1. Set up the Surface Code GitHub App and connect it to APIsec as in the APIsec docs.
+2. In the app's settings, add **Contents: Read-only** to its repository permissions. This grants the
+   repo access required for analysis. GitHub then asks the org to approve the new permission on the
+   app's installation; approve it, and make sure the app is installed on **All repositories** or on the
+   repositories to scan.
+3. **Generate a private key** for this workflow (a `.pem` file downloads). The key you gave APIsec
+   stays there; APIsec requests metadata-only tokens with it, so it doesn't use the Contents
+   permission.
+4. Add the variable `ORCHESTRATOR_APP_ID` with the app's App ID or Client ID, and the secret
    `ORCHESTRATOR_APP_PRIVATE_KEY` with the full contents of the `.pem` file. If you add the secret at
    org level, limit its access to the repository that runs this workflow.
 
 Each job mints its own short-lived installation token, and each scan job's token can read only the
 repository it scans.
 
-If you have already connected the Surface Code GitHub App to APIsec, use it for this workflow too.
-Adding **Contents: Read-only** to its repository permissions grants the repo access required for
-analysis; then generate a second private key for this workflow. The first key stays in APIsec. APIsec
-requests metadata-only tokens with its key, so it doesn't use the Contents permission. The app's
-repository selection then sets both what APIsec lists and what gets scanned. Create a separate app
-instead if you want the key held by APIsec to have no access to code.
+To keep the key held by APIsec away from code entirely, create a separate app for this workflow
+instead: Org → Settings → Developer settings → GitHub Apps → **New GitHub App**, any name and homepage
+URL, untick **Webhook → Active**, repository permissions **Contents: Read-only** and **Metadata:
+Read-only** and nothing else, install it on the org, then follow steps 3 and 4.
 
-To rotate the key, generate a second private key on the app, replace the secret, confirm a run
-succeeds, then delete the old key.
+To rotate the key, generate another private key on the app, replace the secret, confirm a run
+succeeds, then delete the workflow's old key. Don't delete the key APIsec holds; that disconnects the
+app from APIsec.
 
 **Personal access token.** Instead of an app, add the secret `ORG_READ_TOKEN`: a fine-grained PAT
 for the org with **Contents: read** and **Metadata: read** on the repositories to scan. Some orgs must
