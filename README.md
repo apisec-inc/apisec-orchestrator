@@ -29,8 +29,8 @@ For a first scan of a large org, set **max_repos** (e.g. `100`) and run until th
 expire, and the repositories selected on its installation are exactly what gets scanned.
 
 1. Org → Settings → Developer settings → GitHub Apps → **New GitHub App**. Any name and homepage URL;
-   untick **Webhook → Active** (if this is also your APIsec inventory app, keep the webhook active and
-   set it up as in the APIsec docs). Repository permissions: **Contents: Read-only** and **Metadata:
+   untick **Webhook → Active** (if this is also your Surface Code GitHub App, keep the webhook active
+   and set it up as in the APIsec docs). Repository permissions: **Contents: Read-only** and **Metadata:
    Read-only**, nothing else. Install only on this account.
 2. **Generate a private key** (a `.pem` file downloads), then **Install App** on the org and choose
    **All repositories** or the repositories to scan.
@@ -41,12 +41,12 @@ expire, and the repositories selected on its installation are exactly what gets 
 Each job mints its own short-lived installation token, and each scan job's token can read only the
 repository it scans.
 
-If you have already connected a GitHub App to APIsec for the repository inventory, use that app: add
-**Contents: Read-only** to its repository permissions and generate a second private key for this
-workflow. The first key stays in APIsec. APIsec requests metadata-only tokens with its key, so it
-doesn't use the Contents permission. The app's repository selection then sets both the inventory and
-what gets scanned. Create a separate app instead if you want the key held by APIsec to have no access
-to code.
+If you have already connected the Surface Code GitHub App to APIsec, use it for this workflow too.
+Adding **Contents: Read-only** to its repository permissions grants the repo access required for
+analysis; then generate a second private key for this workflow. The first key stays in APIsec. APIsec
+requests metadata-only tokens with its key, so it doesn't use the Contents permission. The app's
+repository selection then sets both what APIsec lists and what gets scanned. Create a separate app
+instead if you want the key held by APIsec to have no access to code.
 
 To rotate the key, generate a second private key on the app, replace the secret, confirm a run
 succeeds, then delete the old key.
