@@ -105,6 +105,19 @@ def test_plan_fails_when_installation_has_no_repos(plan_env, monkeypatch, capsys
     assert "no repositories selected" in capsys.readouterr().err
 
 
+def test_plan_warns_when_the_app_key_does_not_reach_the_workflow(plan_env, capsys):
+    env, _ = plan_env
+    assert cli.cmd_plan(None, {**env, "ORCHESTRATOR_APP_ID": "123"}) == 0
+    assert "ORCHESTRATOR_APP_PRIVATE_KEY didn't reach this workflow" in capsys.readouterr().err
+
+
+def test_plan_with_the_app_does_not_warn_about_its_key(plan_env, monkeypatch, capsys):
+    env, _ = plan_env
+    monkeypatch.setattr(repos, "list_installation_repos", lambda _t: ORG_REPOS[:1])
+    assert cli.cmd_plan(None, {**env, "ORCHESTRATOR_APP_ID": "123", "APP_TOKEN": "ghs"}) == 0
+    assert "::warning" not in capsys.readouterr().err
+
+
 def test_plan_requires_target_org(plan_env):
     env, _ = plan_env
     assert cli.cmd_plan(None, {**env, "TARGET_ORG": " "}) == 1

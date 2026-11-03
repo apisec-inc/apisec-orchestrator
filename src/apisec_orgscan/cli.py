@@ -54,6 +54,14 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     if not org:
         return _error("TARGET_ORG is empty; refusing to guess which org to scan.")
     kind, token = github_credential(env)
+    if kind != "app" and env.get("ORCHESTRATOR_APP_ID", "").strip():
+        # A caller workflow from before 1.1 doesn't pass the key to this workflow.
+        _warn(
+            "ORCHESTRATOR_APP_ID is set, but ORCHESTRATOR_APP_PRIVATE_KEY didn't reach this workflow, "
+            "so the GitHub App isn't used. Add "
+            "'ORCHESTRATOR_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}' "
+            "under secrets: in your workflow file, or copy the current template."
+        )
     if kind == "job":
         _warn(
             "Neither a GitHub App (ORCHESTRATOR_APP_ID + ORCHESTRATOR_APP_PRIVATE_KEY) nor "
