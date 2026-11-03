@@ -14,9 +14,10 @@ sent to APIsec.
    `.github/workflows/apisec-scan.yml`.
 2. Give the workflow read access to the repositories to scan, either with a GitHub App (recommended) or a
    personal access token. See [GitHub access](#github-access).
-3. Add the secret `APISEC_TOKEN` (your APIsec personal access token) and the variable `APISEC_ENDPOINT`
-   (your APIsec API URL, e.g. `https://api.apisecapps.com`). Use Settings → Secrets and variables →
-   Actions, at org or repository level.
+3. Add the secret `APISEC_TOKEN` (your APIsec personal access token) and the variables `APISEC_ENDPOINT`
+   (your APIsec API URL, e.g. `https://api.apisecapps.com`) and `APISEC_REGISTRATION_CODE` (the
+   registration code APIsec gave you). Use Settings → Secrets and variables → Actions, at org or
+   repository level.
 4. Actions → **APIsec Surface org scan** → **Run workflow**. Optionally enable **dry_run** first to
    verify setup (repos are analyzed locally; nothing is uploaded to APIsec).
 5. Run without **dry_run** to upload results. After that, scans run nightly at 02:00 UTC.
@@ -68,7 +69,6 @@ access to the org. If both are set, the app is used.
 | `TARGET_ORG` | this org | Scan a different org (the GitHub App must be installed there) |
 | `EXCLUDE_REPOS` | | Comma-separated `owner/repo` names to skip |
 | `APISEC_LLM_ENRICHMENT` | on | `0` keeps source snippets out of LLM-assisted route discovery |
-| `APISEC_REGISTRATION_CODE` | `ci-orchestrator` | Registration code the scanned apps are registered with |
 | `APISEC_CLI_VERSION` | newest 1.x | Pin the Surface CLI to one release, e.g. `1.2.0`, for change control or to hold back a bad release |
 
 Self-hosted runners and larger runners must run Linux (x64 or arm64) with git, and need outbound access

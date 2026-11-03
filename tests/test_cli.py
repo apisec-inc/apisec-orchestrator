@@ -26,7 +26,12 @@ def plan_env(tmp_path, monkeypatch):
     monkeypatch.setattr(repos, "list_org_repos", lambda org, token: ORG_REPOS)
     monkeypatch.setattr(repos, "find_empty", lambda *_: frozenset())
     monkeypatch.setattr(settings, "newest_cli_version", lambda: "1.2.0")
-    env = {"TARGET_ORG": "acme", "ORG_READ_TOKEN": "pat", "GITHUB_REPOSITORY": "acme/apisec-scan"}
+    env = {
+        "TARGET_ORG": "acme",
+        "ORG_READ_TOKEN": "pat",
+        "GITHUB_REPOSITORY": "acme/apisec-scan",
+        "APISEC_REGISTRATION_CODE": "123-456",
+    }
     return env, out
 
 

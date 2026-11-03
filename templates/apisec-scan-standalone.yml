@@ -100,6 +100,7 @@ jobs:
           IN_RUN_PROFILE: ${{ inputs.run_profile }}
           APISEC_RUN_PROFILE: ${{ vars.APISEC_RUN_PROFILE }}
           APISEC_CLI_VERSION: ${{ vars.APISEC_CLI_VERSION }}
+          APISEC_REGISTRATION_CODE: ${{ vars.APISEC_REGISTRATION_CODE }}
         run: apisec-orgscan plan
 
   scan:

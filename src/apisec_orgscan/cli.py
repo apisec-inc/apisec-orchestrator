@@ -149,7 +149,7 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     # not the one scanned. An explicit repo id would override that.
     child.pop("APISEC_CANONICAL_REPO_ID", None)
     child["GITHUB_REPOSITORY"] = full_name
-    child["APISEC_REGISTRATION_CODE"] = env.get("APISEC_REGISTRATION_CODE", "").strip() or "ci-orchestrator"
+    child["APISEC_REGISTRATION_CODE"] = settings.registration_code(env)
     child["APISEC_RUN_PROFILE"] = env.get("RUN_PROFILE") or "surface"
     if env.get("APISEC_LLM_ENRICHMENT", "").strip():
         child["APISEC_SURFACE_LLM_EXTRACTION"] = env["APISEC_LLM_ENRICHMENT"].strip()

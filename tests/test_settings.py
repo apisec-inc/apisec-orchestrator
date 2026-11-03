@@ -37,9 +37,18 @@ def test_invalid_run_profile_falls_back_with_warning():
 
 
 def test_cli_version_defaults_to_newest_compatible_release():
-    resolved, warnings = settings.resolve({}, newest=lambda: "1.9.0")
+    resolved, warnings = settings.resolve({"APISEC_REGISTRATION_CODE": "123-456"}, newest=lambda: "1.9.0")
     assert resolved["cli_version"] == "1.9.0"
     assert warnings == []
+
+
+def test_missing_registration_code_warns_and_uses_the_placeholder():
+    _, warnings = settings.resolve({"APISEC_REGISTRATION_CODE": " "}, newest=lambda: "1.9.0")
+    assert warnings == [
+        "Set the APISEC_REGISTRATION_CODE variable to your APIsec registration code; until then, "
+        "scans register with the placeholder ci-orchestrator."
+    ]
+    assert settings.registration_code({}) == "ci-orchestrator"
 
 
 def test_cli_version_variable_pins_without_lookup():

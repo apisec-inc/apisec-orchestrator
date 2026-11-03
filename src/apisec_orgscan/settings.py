@@ -93,6 +93,15 @@ def cli_version(
     return CLI_MIN_VERSION, (f"Could not resolve the newest {CLI_REQUIREMENT}; using {CLI_MIN_VERSION}.")
 
 
+# Used only until the customer sets APISEC_REGISTRATION_CODE, which APIsec
+# will start enforcing.
+REGISTRATION_CODE_PLACEHOLDER = "ci-orchestrator"
+
+
+def registration_code(env: Mapping[str, str]) -> str:
+    return env.get("APISEC_REGISTRATION_CODE", "").strip() or REGISTRATION_CODE_PLACEHOLDER
+
+
 def resolve(
     env: Mapping[str, str], newest: Callable[[], str | None] | None = None
 ) -> tuple[dict[str, str], list[str]]:
@@ -104,4 +113,10 @@ def resolve(
         "cli_version": version,
         "throughput": str(throughput(env)),
     }
-    return settings, [w for w in (profile_warning, version_warning) if w]
+    code_warning = (
+        None
+        if env.get("APISEC_REGISTRATION_CODE", "").strip()
+        else "Set the APISEC_REGISTRATION_CODE variable to your APIsec registration code; until then, "
+        f"scans register with the placeholder {REGISTRATION_CODE_PLACEHOLDER}."
+    )
+    return settings, [w for w in (profile_warning, version_warning, code_warning) if w]
