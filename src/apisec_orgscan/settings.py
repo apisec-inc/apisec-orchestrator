@@ -117,6 +117,7 @@ def resolve(
         None
         if env.get("APISEC_REGISTRATION_CODE", "").strip()
         else "Set the APISEC_REGISTRATION_CODE variable to your APIsec registration code; until then, "
-        f"scans register with the placeholder {REGISTRATION_CODE_PLACEHOLDER}."
+        f"scans register with the placeholder {REGISTRATION_CODE_PLACEHOLDER}. If it is set, your workflow "
+        "file is from before 1.1 and doesn't pass it on: copy the current template."
     )
     return settings, [w for w in (profile_warning, version_warning, code_warning) if w]

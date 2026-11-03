@@ -169,7 +169,20 @@ def test_scan_gives_surface_the_scanned_repo_not_the_host_repo(ran):
     assert _scan(env, "acme/Payments-API") == 0
     child = ran[0][1]
     assert child["GITHUB_REPOSITORY"] == "acme/Payments-API"
-    assert "APISEC_CANONICAL_REPO_ID" not in child
+    # Replaces any id in the job env; CLI 1.1 would otherwise force a new app.
+    assert child["APISEC_CANONICAL_REPO_ID"] == "github:acme/payments-api"
+
+
+@pytest.mark.parametrize(
+    ("server", "expected"),
+    [
+        ("", "github:acme/payments-api"),
+        ("https://github.com/", "github:acme/payments-api"),
+        ("https://GHE.example.com", "github:ghe.example.com/acme/payments-api"),
+    ],
+)
+def test_repo_id_matches_surface_cli(server, expected):
+    assert cli.repo_id("Acme/Payments-API", server) == expected
 
 
 @pytest.mark.parametrize(
@@ -187,6 +200,7 @@ def test_scan_without_repo_name_reads_it_from_the_checkout(ran, tmp_path, url):
     args = argparse.Namespace(path=str(tmp_path), repo_id="42", repo_full_name="")
     assert cli.cmd_scan(args, {"APISEC_ENDPOINT": "https://a", "APISEC_PAT": "t"}) == 0
     assert ran[0][1]["GITHUB_REPOSITORY"] == "acme/payments"
+    assert ran[0][1]["APISEC_CANONICAL_REPO_ID"].endswith("acme/payments")
 
 
 def test_scan_refuses_a_repo_it_cannot_name(ran, tmp_path, capsys):

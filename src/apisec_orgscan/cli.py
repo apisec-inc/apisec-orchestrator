@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 from . import __version__, repos, settings, store
 
@@ -124,6 +125,14 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
 CLI_STATE_FILE = os.path.join("apisec-code-bolt", "state.yaml")
 
 
+def repo_id(full_name: str, server_url: str = "") -> str:
+    """``github:<owner>/<repo>`` as Surface CLI 1.2 derives it in GitHub Actions (core/ci_identity.py)."""
+    owner, name = full_name.strip().lower().split("/", 1)
+    server = (server_url or "https://github.com").strip().rstrip("/")
+    host = (urlparse(server if "://" in server else f"https://{server}").hostname or "github.com").lower()
+    return f"github:{owner}/{name}" if host == "github.com" else f"github:{host}/{owner}/{name}"
+
+
 def _remote_full_name(path: str) -> str:
     """``owner/repo`` from the checkout's origin URL, as actions/checkout sets it."""
     try:
@@ -152,11 +161,11 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
         return _error(f"{args.path} was not scanned: could not tell which repository it is.")
 
     child = dict(env)
-    # Surface CLI 1.2 identifies the repo as github:<owner>/<repo> from
-    # GITHUB_REPOSITORY, which in this job names the repo running the workflow,
-    # not the one scanned. An explicit repo id would override that.
-    child.pop("APISEC_CANONICAL_REPO_ID", None)
+    # GITHUB_REPOSITORY names the repo running this workflow, not the one
+    # scanned. The explicit id is the one Surface CLI 1.2 derives from it; CLI
+    # 1.1 has no such step and, without an id, creates a new app on every scan.
     child["GITHUB_REPOSITORY"] = full_name
+    child["APISEC_CANONICAL_REPO_ID"] = repo_id(full_name, env.get("GITHUB_SERVER_URL", ""))
     child["APISEC_REGISTRATION_CODE"] = settings.registration_code(env)
     child["APISEC_RUN_PROFILE"] = env.get("RUN_PROFILE") or "surface"
     if env.get("APISEC_LLM_ENRICHMENT", "").strip():
