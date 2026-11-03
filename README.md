@@ -81,8 +81,9 @@ under `/Users/runner/hostedtoolcache`.
 
 Each scanned repository has one application in APIsec, found by the repository's id. Scans identify a
 repository as `github:<owner>/<repo>`, the id the Surface CLI uses when it runs in the repository's own
-workflow, so a repository scanned both ways keeps one application. A scan that uploads nothing creates
-no application.
+workflow, so a repository scanned both ways keeps one application. With the default `surface` profile,
+every scanned repository gets an application, including one with no API routes. With the `legacy`
+profile, a repository with no API contract to publish is skipped and gets no application.
 
 Releases before 1.1 and the APIsec GitHub Action identify a repository by its numeric id instead. A
 repository scanned that way may have a separate application; ask APIsec to link the two.
