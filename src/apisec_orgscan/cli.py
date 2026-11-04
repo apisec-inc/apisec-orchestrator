@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 from . import __version__, repos, settings, store
 
@@ -40,13 +41,33 @@ def _error(message: str) -> int:
     return 1
 
 
+def github_credential(env: Mapping[str, str]) -> tuple[str, str]:
+    """(kind, token) for listing repos: GitHub App token, then PAT, then the job token."""
+    if env.get("APP_TOKEN"):
+        return "app", env["APP_TOKEN"]
+    if env.get("ORG_READ_TOKEN"):
+        return "pat", env["ORG_READ_TOKEN"]
+    return "job", env.get("GITHUB_TOKEN", "")
+
+
 def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     org = env.get("TARGET_ORG", "").strip()
     if not org:
         return _error("TARGET_ORG is empty; refusing to guess which org to scan.")
-    token = env.get("ORG_READ_TOKEN") or env.get("GITHUB_TOKEN", "")
-    if not env.get("ORG_READ_TOKEN"):
-        _warn("ORG_READ_TOKEN is not set; only public repos and this repo can be scanned.")
+    kind, token = github_credential(env)
+    if kind != "app" and env.get("ORCHESTRATOR_APP_ID", "").strip():
+        # A caller workflow from before 1.1 doesn't pass the key to this workflow.
+        _warn(
+            "ORCHESTRATOR_APP_ID is set, but ORCHESTRATOR_APP_PRIVATE_KEY didn't reach this workflow, "
+            "so the GitHub App isn't used. Add "
+            "'ORCHESTRATOR_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}' "
+            "under secrets: in your workflow file, or copy the current template."
+        )
+    if kind == "job":
+        _warn(
+            "Neither a GitHub App (ORCHESTRATOR_APP_ID + ORCHESTRATOR_APP_PRIVATE_KEY) nor "
+            "ORG_READ_TOKEN is set; only public repos and this repo can be scanned."
+        )
 
     run_settings, warnings = settings.resolve(env)
     for warning in warnings:
@@ -57,8 +78,20 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     cache = store.load()
     print(f"Store: {len(cache)} repos known.", file=sys.stderr)
 
-    org_repos = repos.list_org_repos(org, token)
-    print(f"Org '{org}': {len(org_repos)} repos.", file=sys.stderr)
+    if kind == "app":
+        org_repos = repos.list_installation_repos(token)
+        print(f"GitHub App installation on '{org}': {len(org_repos)} repos selected.", file=sys.stderr)
+        if not org_repos:
+            return _error(
+                f"The GitHub App installation on '{org}' has no repositories selected; "
+                "choose the repos to scan in the app's installation settings."
+            )
+    else:
+        org_repos = repos.list_org_repos(org, token)
+        print(
+            f"Org '{org}': {len(org_repos)} repos ({'ORG_READ_TOKEN' if kind == 'pat' else 'job token'}).",
+            file=sys.stderr,
+        )
 
     exclude = {name.strip() for name in env.get("EXCLUDE_REPOS", "").split(",") if name.strip()}
     if host_repo:
@@ -73,7 +106,8 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     candidates = repos.select_candidates(org_repos, cache, force, cap, frozenset(exclude), empty)
 
     print(
-        f"Scan plan: {len(candidates)} repo(s), max-parallel {run_settings['throughput']}"
+        f"Scan plan: {len(candidates)} repo(s), max-parallel {run_settings['throughput']}, "
+        f"Surface CLI {run_settings['cli_version']}"
         f"{' (full scan)' if force else ''}",
         file=sys.stderr,
     )
@@ -85,20 +119,62 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     return 0
 
 
+# The Surface CLI keeps the application id here and uploads to that application
+# when the file exists. A copy committed to a scanned repo must not decide where
+# this scan goes.
+CLI_STATE_FILE = os.path.join("apisec-code-bolt", "state.yaml")
+
+
+def repo_id(full_name: str, server_url: str = "") -> str:
+    """``github:<owner>/<repo>`` as Surface CLI 1.2 derives it in GitHub Actions (core/ci_identity.py)."""
+    owner, name = full_name.strip().lower().split("/", 1)
+    server = (server_url or "https://github.com").strip().rstrip("/")
+    host = (urlparse(server if "://" in server else f"https://{server}").hostname or "github.com").lower()
+    return f"github:{owner}/{name}" if host == "github.com" else f"github:{host}/{owner}/{name}"
+
+
+def _remote_full_name(path: str) -> str:
+    """``owner/repo`` from the checkout's origin URL, as actions/checkout sets it."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", path, "remote", "get-url", "origin"], capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    url = out.stdout.strip() if out.returncode == 0 else ""
+    parts = url.removesuffix(".git").rstrip("/").replace(":", "/").split("/")
+    return "/".join(parts[-2:]) if len(parts) >= 2 and all(parts[-2:]) else ""
+
+
 def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     endpoint = env.get("APISEC_ENDPOINT", "").strip()
     if not endpoint:
         return _error("Set the APISEC_ENDPOINT org variable to your APIsec API URL.")
     dry_run = settings.truthy(env.get("DRY_RUN"))
-    if not dry_run and not env.get("APISEC_PAT"):
+    pat = env.get("APISEC_PAT", "")
+    if not dry_run and not pat:
         return _error("Set the APISEC_TOKEN secret, or run with dry_run.")
 
+    # Workflows from before 1.1 do not pass the name; the checkout knows it.
+    full_name = args.repo_full_name.strip() or _remote_full_name(args.path)
+    if not full_name:
+        return _error(f"{args.path} was not scanned: could not tell which repository it is.")
+
     child = dict(env)
-    child["APISEC_CANONICAL_REPO_ID"] = f"github:{args.repo_id}"
-    child["APISEC_REGISTRATION_CODE"] = "ci-orchestrator"
+    # GITHUB_REPOSITORY names the repo running this workflow, not the one
+    # scanned. The explicit id is the one Surface CLI 1.2 derives from it; CLI
+    # 1.1 has no such step and, without an id, creates a new app on every scan.
+    child["GITHUB_REPOSITORY"] = full_name
+    child["APISEC_CANONICAL_REPO_ID"] = repo_id(full_name, env.get("GITHUB_SERVER_URL", ""))
+    child["APISEC_REGISTRATION_CODE"] = settings.registration_code(env)
     child["APISEC_RUN_PROFILE"] = env.get("RUN_PROFILE") or "surface"
     if env.get("APISEC_LLM_ENRICHMENT", "").strip():
         child["APISEC_SURFACE_LLM_EXTRACTION"] = env["APISEC_LLM_ENRICHMENT"].strip()
+
+    state = os.path.join(args.path, CLI_STATE_FILE)
+    if os.path.isfile(state):
+        os.remove(state)
+        print(f"Ignoring {CLI_STATE_FILE} committed to {full_name}.", file=sys.stderr)
 
     cmd = [
         "apisec-surface",
@@ -111,7 +187,7 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     ]
     if dry_run:
         cmd.append("--dry-run")
-    print(f"profile={child['APISEC_RUN_PROFILE']} dry_run={dry_run}", file=sys.stderr)
+    print(f"profile={child['APISEC_RUN_PROFILE']} dry_run={dry_run} repo={full_name}", file=sys.stderr)
     rc = subprocess.call(cmd, env=child)
     if rc:
         if dry_run:
@@ -143,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     scan = sub.add_parser("scan")
     scan.add_argument("path")
     scan.add_argument("--repo-id", required=True)
+    scan.add_argument("--repo-full-name", default="")
     scan.set_defaults(fn=cmd_scan)
     record = sub.add_parser("record")
     record.add_argument("--repo-id", required=True)

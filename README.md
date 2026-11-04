@@ -12,39 +12,98 @@ sent to APIsec.
    [template](https://github.com/apisec-inc/apisec-surface-scan-template) (**Use this template**), or create
    any repository and add [`templates/apisec-scan.yml`](templates/apisec-scan.yml) as
    `.github/workflows/apisec-scan.yml`.
-2. Add secrets (Settings → Secrets and variables → Actions, at org or repository level):
-
-   | Secret | Value |
-   |---|---|
-   | `APISEC_TOKEN` | APIsec personal access token |
-   | `ORG_READ_TOKEN` | Fine-grained GitHub PAT for the org with **Contents: read** and **Metadata: read** |
-
-3. Add the variable `APISEC_ENDPOINT` with your APIsec API URL, e.g. `https://api.apisecapps.com`.
+2. Give the workflow read access to the repositories to scan, either with a GitHub App (recommended) or a
+   personal access token. See [GitHub access](#github-access).
+3. Add the secret `APISEC_TOKEN` (your APIsec personal access token) and the variables `APISEC_ENDPOINT`
+   (your APIsec API URL, e.g. `https://api.apisecapps.com`) and `APISEC_REGISTRATION_CODE` (the
+   registration code APIsec gave you). Use Settings → Secrets and variables → Actions, at org or
+   repository level.
 4. Actions → **APIsec Surface org scan** → **Run workflow**. Optionally enable **dry_run** first to
    verify setup (repos are analyzed locally; nothing is uploaded to APIsec).
 5. Run without **dry_run** to upload results. After that, scans run nightly at 02:00 UTC.
 
 For a first scan of a large org, set **max_repos** (e.g. `100`) and run until the plan is empty.
 
+### GitHub access
+
+**GitHub App (recommended).** Use the Surface Code GitHub App that connects your org to APIsec. The app
+belongs to the org rather than to a person, its key does not expire, and the repositories selected on
+its installation are what APIsec lists and what gets scanned.
+
+1. Set up the Surface Code GitHub App and connect it to APIsec as in the APIsec docs.
+2. In the app's settings, add **Contents: Read-only** to its repository permissions. This grants the
+   repo access required for analysis. GitHub then asks the org to approve the new permission on the
+   app's installation; approve it, and make sure the app is installed on **All repositories** or on the
+   repositories to scan.
+3. **Generate a private key** for this workflow (a `.pem` file downloads). The key you gave APIsec
+   stays there; APIsec requests metadata-only tokens with it, so it doesn't use the Contents
+   permission.
+4. Add the variable `ORCHESTRATOR_APP_ID` with the app's App ID or Client ID, and the secret
+   `ORCHESTRATOR_APP_PRIVATE_KEY` with the full contents of the `.pem` file. If you add the secret at
+   org level, limit its access to the repository that runs this workflow.
+5. If your workflow file is from a release before 1.1, it doesn't pass the key on. Add this line under
+   `secrets:` in it, or replace the file with the current [template](templates/apisec-scan.yml):
+
+   ```yaml
+   ORCHESTRATOR_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
+   ```
+
+   A standalone workflow from before 1.1 has no GitHub App support; replace it with the current
+   [standalone template](templates/apisec-scan-standalone.yml).
+
+Each job mints its own short-lived installation token, and each scan job's token can read only the
+repository it scans.
+
+To keep the key held by APIsec away from code entirely, create a separate app for this workflow
+instead: Org → Settings → Developer settings → GitHub Apps → **New GitHub App**, any name and homepage
+URL, untick **Webhook → Active**, repository permissions **Contents: Read-only** and **Metadata:
+Read-only** and nothing else, install it on the org, then follow steps 3 to 5.
+
+To rotate the key, generate another private key on the app, replace the secret, confirm a run
+succeeds, then delete the workflow's old key. Don't delete the key APIsec holds; that disconnects the
+app from APIsec.
+
+**Personal access token.** Instead of an app, add the secret `ORG_READ_TOKEN`: a fine-grained PAT
+for the org with **Contents: read** and **Metadata: read** on the repositories to scan. Some orgs must
+approve fine-grained PATs first. The token stops working when it expires or when its owner loses
+access to the org. If both are set, the app is used.
+
 ### Optional variables
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `THROUGHPUT` | `2` | Repositories scanned in parallel (1–10) |
-| `ORCHESTRATOR_RUNNER` | `github-hosted` | `self-hosted` runs every job on runners labelled `self-hosted` and `apisec` |
+| `ORCHESTRATOR_RUNNER` | `github-hosted` | `self-hosted` runs every job on runners labelled `self-hosted` and `apisec`; any other value is a runner label, such as a GitHub-hosted larger runner's name |
 | `APISEC_RUN_PROFILE` | `surface` | `legacy` publishes only a committed OpenAPI contract |
-| `TARGET_ORG` | this org | Scan a different org |
+| `TARGET_ORG` | this org | Scan a different org (the GitHub App must be installed there) |
 | `EXCLUDE_REPOS` | | Comma-separated `owner/repo` names to skip |
 | `APISEC_LLM_ENRICHMENT` | on | `0` keeps source snippets out of LLM-assisted route discovery |
-| `APISEC_CLI_VERSION` | pinned | Override the Surface CLI version |
+| `APISEC_CLI_VERSION` | newest 1.x | Pin the Surface CLI to one release, e.g. `1.2.0`, for change control or to hold back a bad release |
 
-Self-hosted runners need Python 3.10+, git, and outbound access to GitHub, PyPI and `APISEC_ENDPOINT`.
+Self-hosted runners and larger runners must run Linux (x64 or arm64) with git, and need outbound access
+to GitHub, PyPI and `APISEC_ENDPOINT`, including when a larger runner uses private networking; each job
+installs its own Python. All jobs run on the runner you choose, so allow the repository that runs this
+workflow to use it. macOS runners are not supported: there, `actions/setup-python` installs Python only
+under `/Users/runner/hostedtoolcache`.
+
+## Applications in APIsec
+
+Each scanned repository has one application in APIsec, found by the repository's id. Scans identify a
+repository as `github:<owner>/<repo>`, the id the Surface CLI uses when it runs in the repository's own
+workflow, so a repository scanned both ways keeps one application. With the default `surface` profile,
+every scanned repository gets an application, including one with no API routes. With the `legacy`
+profile, a repository with no API contract to publish is skipped and gets no application.
+
+Releases before 1.1 and the APIsec GitHub Action identify a repository by its numeric id instead. A
+repository scanned that way may have a separate application; ask APIsec to link the two.
 
 ## Updates
 
-Your workflow calls `scan.yml@v1`. Each release moves `v1`, so fixes reach you on the next nightly run
-with no change on your side. Breaking changes ship as `v2`. To control updates yourself, replace `@v1`
-with a release tag such as `@v1.0.0`.
+Your workflow calls `scan.yml@v1`. Each release moves `v1`, and every run installs the newest 1.x of
+the `apisec-orgscan` package and the Surface CLI, so fixes reach you on the next nightly run with no
+change on your side. Breaking changes ship as `v2`. Replacing `@v1` with a release tag such as `@v1.1.0`
+fixes the workflow itself; the packages still update within 1.x. To hold the Surface CLI at one
+release, set `APISEC_CLI_VERSION`.
 
 ## Organizations that only allow their own workflows
 
@@ -55,8 +114,9 @@ arrive without editing it. Setup is otherwise identical.
 
 ## Moving from the zip version
 
-Either way, applications in APIsec are matched by each scanned repository's GitHub id, so no duplicates
-are created.
+The zip version identified repositories by their numeric id, so a repository it scanned may get a
+second application on the first scan by this workflow; ask APIsec to link them (see
+[Applications in APIsec](#applications-in-apisec)).
 
 - **Start fresh:** delete the old orchestrator repository and follow [Setup](#setup). The first run
   rescans every repository once.
@@ -80,7 +140,9 @@ holds the GitHub-only parts (matrix fan-out, runners, artifacts).
 ### Releasing
 
 1. Set `__version__` in `src/apisec_orgscan/__init__.py` and run `python scripts/sync_templates.py`
-   (pins the workflow and regenerates the standalone template).
+   (sets the workflow's `apisec-orgscan` range, e.g. `>=1.1,<2`, and regenerates the standalone template).
+   Runs use the newest release in that range, so a patch or minor release reaches `@v1` callers
+   without a new tag; a workflow change still needs one.
 2. Merge, then push tag `vX.Y.Z`. The release workflow tests, publishes to PyPI and moves `vX`.
 
 Tags such as `v1.1.0rc1` publish a pre-release without moving `v1`; point a test caller at that tag.
