@@ -20,9 +20,22 @@ def _load(path):
 
 def test_reusable_workflow_installs_newest_release_of_this_major_line():
     major, minor = __version__.split(".")[:2]
-    spec = f"apisec-orgscan>={major}.{minor},<{int(major) + 1}"
+    floor = __version__ if "rc" in __version__ else f"{major}.{minor}"
+    spec = f"apisec-orgscan>={floor},<{int(major) + 1}"
     assert _load(WORKFLOW)["env"]["ORGSCAN_SPEC"] == spec
     assert _load(STANDALONE)["env"]["ORGSCAN_SPEC"] == spec
+
+
+def test_prerelease_spec_admits_the_prerelease():
+    from packaging.specifiers import SpecifierSet
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from sync_templates import orgscan_spec
+
+    assert orgscan_spec("1.1.0") == "apisec-orgscan>=1.1,<2"
+    spec = SpecifierSet(orgscan_spec("1.1.0rc1").removeprefix("apisec-orgscan"))
+    assert "1.1.0rc1" in spec.filter(["1.0.1", "1.1.0rc1"])
+    assert spec.contains("1.1.0")
 
 
 def test_later_jobs_install_the_orgscan_version_plan_resolved():

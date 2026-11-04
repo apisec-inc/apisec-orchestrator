@@ -54,7 +54,7 @@ on:
         required: false
 
 env:
-  ORGSCAN_SPEC: apisec-orgscan>=1.1,<2
+  ORGSCAN_SPEC: apisec-orgscan>=1.1.0rc1,<2
 
 jobs:
   plan:

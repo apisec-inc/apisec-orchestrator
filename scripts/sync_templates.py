@@ -72,9 +72,15 @@ def version() -> str:
     return match.group(1)
 
 
+def orgscan_spec(ver: str) -> str:
+    major, minor = ver.split(".")[:2]
+    # pip skips pre-releases unless the specifier names one, and 1.1.0rc1 sorts below 1.1.
+    floor = ver if re.search(r"[a-z]", ver) else f"{major}.{minor}"
+    return f"apisec-orgscan>={floor},<{int(major) + 1}"
+
+
 def expected() -> dict[Path, str]:
-    major, minor = version().split(".")[:2]
-    spec = f"apisec-orgscan>={major}.{minor},<{int(major) + 1}"
+    spec = orgscan_spec(version())
     workflow = re.sub(
         r"ORGSCAN_SPEC: apisec-orgscan\S+",
         f"ORGSCAN_SPEC: {spec}",
