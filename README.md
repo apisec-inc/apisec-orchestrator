@@ -97,6 +97,19 @@ profile, a repository with no API contract to publish is skipped and gets no app
 Releases before 1.1 and the APIsec GitHub Action identify a repository by its numeric id instead. A
 repository scanned that way may have a separate application; ask APIsec to link the two.
 
+## When scans fail
+
+A run with failed jobs still scans every other repository, and failed repositories are retried on the
+next run. To see why jobs failed, run [`tools/surface_failures.py`](tools/README.md) on any machine
+with the GitHub CLI logged in to your org:
+
+```
+python3 surface_failures.py OWNER/REPO --since 7d
+```
+
+It writes a summary of every failed job (which repository, why, and what to do) and a zip of the
+redacted logs to send to APIsec.
+
 ## Updates
 
 Your workflow calls `scan.yml@v1`. Each release moves `v1`, and every run installs the newest 1.x of
