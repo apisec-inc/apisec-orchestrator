@@ -1,8 +1,10 @@
-# actionlint's bundled metadata for create-github-app-token predates v3, which
-# added `client-id` and made the deprecated `app-id` optional. Drop these once
-# actionlint catches up.
+# actionlint 1.7.12 predates two things GitHub accepts. Drop these once it
+# catches up:
+# - create-github-app-token v3 added `client-id` and made `app-id` optional.
+# - concurrency `queue` (live-tested in PR #5).
 paths:
   '**/*.yml':
     ignore:
       - 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"'
       - 'input "client-id" is not defined in action "actions/create-github-app-token@v3"'
+      - 'unexpected key "queue" for "concurrency" section'
