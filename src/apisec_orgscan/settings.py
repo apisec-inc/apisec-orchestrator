@@ -83,8 +83,7 @@ def cli_version(
         release = _release(pinned)
         if release and release < _release(CLI_MIN_VERSION):
             return CLI_MIN_VERSION, (
-                f"APISEC_CLI_VERSION {pinned} would create a new application on every run; "
-                f"using {CLI_MIN_VERSION}, the oldest release this workflow supports."
+                f"APISEC_CLI_VERSION {pinned} is older than this workflow supports; using {CLI_MIN_VERSION}."
             )
         return pinned, None
     found = (newest or newest_cli_version)()
