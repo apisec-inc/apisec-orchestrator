@@ -46,7 +46,8 @@ def test_missing_registration_code_warns_and_uses_the_placeholder():
     _, warnings = settings.resolve({"APISEC_REGISTRATION_CODE": " "}, newest=lambda: "1.9.0")
     assert warnings == [
         "Set the APISEC_REGISTRATION_CODE variable to your APIsec registration code; until then, "
-        "scans register with the placeholder ci-orchestrator."
+        "scans register with the placeholder ci-orchestrator. If it is set, your workflow "
+        "file is from before 1.1 and doesn't pass it on: copy the current template."
     ]
     assert settings.registration_code({}) == "ci-orchestrator"
 

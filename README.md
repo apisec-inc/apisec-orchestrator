@@ -41,6 +41,15 @@ its installation are what APIsec lists and what gets scanned.
 4. Add the variable `ORCHESTRATOR_APP_ID` with the app's App ID or Client ID, and the secret
    `ORCHESTRATOR_APP_PRIVATE_KEY` with the full contents of the `.pem` file. If you add the secret at
    org level, limit its access to the repository that runs this workflow.
+5. If your workflow file is from a release before 1.1, it doesn't pass the key on. Add this line under
+   `secrets:` in it, or replace the file with the current [template](templates/apisec-scan.yml):
+
+   ```yaml
+   ORCHESTRATOR_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
+   ```
+
+   A standalone workflow from before 1.1 has no GitHub App support; replace it with the current
+   [standalone template](templates/apisec-scan-standalone.yml).
 
 Each job mints its own short-lived installation token, and each scan job's token can read only the
 repository it scans.
@@ -48,7 +57,7 @@ repository it scans.
 To keep the key held by APIsec away from code entirely, create a separate app for this workflow
 instead: Org → Settings → Developer settings → GitHub Apps → **New GitHub App**, any name and homepage
 URL, untick **Webhook → Active**, repository permissions **Contents: Read-only** and **Metadata:
-Read-only** and nothing else, install it on the org, then follow steps 3 and 4.
+Read-only** and nothing else, install it on the org, then follow steps 3 to 5.
 
 To rotate the key, generate another private key on the app, replace the secret, confirm a run
 succeeds, then delete the workflow's old key. Don't delete the key APIsec holds; that disconnects the

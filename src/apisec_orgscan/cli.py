@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 from . import __version__, integrations, repos, settings, store
 
@@ -54,6 +55,14 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     if not org:
         return _error("TARGET_ORG is empty; refusing to guess which org to scan.")
     kind, token = github_credential(env)
+    if kind != "app" and env.get("ORCHESTRATOR_APP_ID", "").strip():
+        # A caller workflow from before 1.1 doesn't pass the key to this workflow.
+        _warn(
+            "ORCHESTRATOR_APP_ID is set, but ORCHESTRATOR_APP_PRIVATE_KEY didn't reach this workflow, "
+            "so the GitHub App isn't used. Add "
+            "'ORCHESTRATOR_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}' "
+            "under secrets: in your workflow file, or copy the current template."
+        )
     if kind == "job":
         _warn(
             "Neither a GitHub App (ORCHESTRATOR_APP_ID + ORCHESTRATOR_APP_PRIVATE_KEY) nor "
@@ -125,6 +134,14 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
 CLI_STATE_FILE = os.path.join("apisec-code-bolt", "state.yaml")
 
 
+def repo_id(full_name: str, server_url: str = "") -> str:
+    """``github:<owner>/<repo>`` as Surface CLI 1.2 derives it in GitHub Actions (core/ci_identity.py)."""
+    owner, name = full_name.strip().lower().split("/", 1)
+    server = (server_url or "https://github.com").strip().rstrip("/")
+    host = (urlparse(server if "://" in server else f"https://{server}").hostname or "github.com").lower()
+    return f"github:{owner}/{name}" if host == "github.com" else f"github:{host}/{owner}/{name}"
+
+
 def _remote_full_name(path: str) -> str:
     """``owner/repo`` from the checkout's origin URL, as actions/checkout sets it."""
     try:
@@ -153,11 +170,11 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
         return _error(f"{args.path} was not scanned: could not tell which repository it is.")
 
     child = dict(env)
-    # Surface CLI 1.2 identifies the repo as github:<owner>/<repo> from
-    # GITHUB_REPOSITORY, which in this job names the repo running the workflow,
-    # not the one scanned. An explicit repo id would override that.
-    child["APISEC_CANONICAL_REPO_ID"] = f"github:{args.repo_id.strip()}"
+    # GITHUB_REPOSITORY names the repo running this workflow, not the one
+    # scanned. The explicit id is the one Surface CLI 1.2 derives from it; CLI
+    # 1.1 has no such step and, without an id, creates a new app on every scan.
     child["GITHUB_REPOSITORY"] = full_name
+    child["APISEC_CANONICAL_REPO_ID"] = repo_id(full_name, env.get("GITHUB_SERVER_URL", ""))
     if env.get("APISEC_INTEGRATIONS_URL", "").strip():
         child["APISEC_INTEGRATIONS_URL"] = env["APISEC_INTEGRATIONS_URL"].strip()
     child["APISEC_CLIENT_SOURCE"] = "github-actions"

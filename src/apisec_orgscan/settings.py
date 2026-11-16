@@ -93,8 +93,7 @@ def cli_version(
         release = _release(pinned)
         if release and release < _release(CLI_MIN_VERSION):
             return CLI_MIN_VERSION, (
-                f"APISEC_CLI_VERSION {pinned} would create a new application on every run; "
-                f"using {CLI_MIN_VERSION}, the oldest release this workflow supports."
+                f"APISEC_CLI_VERSION {pinned} is older than this workflow supports; using {CLI_MIN_VERSION}."
             )
         return pinned, None
     found = (newest or newest_cli_version)()
@@ -129,6 +128,7 @@ def resolve(
         None
         if env.get("APISEC_REGISTRATION_CODE", "").strip()
         else "Set the APISEC_REGISTRATION_CODE variable to your APIsec registration code; until then, "
-        f"scans register with the placeholder {REGISTRATION_CODE_PLACEHOLDER}."
+        f"scans register with the placeholder {REGISTRATION_CODE_PLACEHOLDER}. If it is set, your workflow "
+        "file is from before 1.1 and doesn't pass it on: copy the current template."
     )
     return settings, [w for w in (profile_warning, version_warning, mode_warning, code_warning) if w]

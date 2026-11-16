@@ -105,6 +105,19 @@ def test_plan_fails_when_installation_has_no_repos(plan_env, monkeypatch, capsys
     assert "no repositories selected" in capsys.readouterr().err
 
 
+def test_plan_warns_when_the_app_key_does_not_reach_the_workflow(plan_env, capsys):
+    env, _ = plan_env
+    assert cli.cmd_plan(None, {**env, "ORCHESTRATOR_APP_ID": "123"}) == 0
+    assert "ORCHESTRATOR_APP_PRIVATE_KEY didn't reach this workflow" in capsys.readouterr().err
+
+
+def test_plan_with_the_app_does_not_warn_about_its_key(plan_env, monkeypatch, capsys):
+    env, _ = plan_env
+    monkeypatch.setattr(repos, "list_installation_repos", lambda _t: ORG_REPOS[:1])
+    assert cli.cmd_plan(None, {**env, "ORCHESTRATOR_APP_ID": "123", "APP_TOKEN": "ghs"}) == 0
+    assert "::warning" not in capsys.readouterr().err
+
+
 def test_plan_requires_target_org(plan_env):
     env, _ = plan_env
     assert cli.cmd_plan(None, {**env, "TARGET_ORG": " "}) == 1
@@ -154,7 +167,20 @@ def test_scan_gives_surface_the_scanned_repo_not_the_host_repo(ran):
     assert _scan(env, "acme/Payments-API") == 0
     child = ran[0][1]
     assert child["GITHUB_REPOSITORY"] == "acme/Payments-API"
-    assert child["APISEC_CANONICAL_REPO_ID"] == "github:42"
+    # Replaces any id in the job env; CLI 1.1 would otherwise force a new app.
+    assert child["APISEC_CANONICAL_REPO_ID"] == "github:acme/payments-api"
+
+
+@pytest.mark.parametrize(
+    ("server", "expected"),
+    [
+        ("", "github:acme/payments-api"),
+        ("https://github.com/", "github:acme/payments-api"),
+        ("https://GHE.example.com", "github:ghe.example.com/acme/payments-api"),
+    ],
+)
+def test_repo_id_matches_surface_cli(server, expected):
+    assert cli.repo_id("Acme/Payments-API", server) == expected
 
 
 @pytest.mark.parametrize(
@@ -172,6 +198,7 @@ def test_scan_without_repo_name_reads_it_from_the_checkout(ran, tmp_path, url):
     args = argparse.Namespace(path=str(tmp_path), repo_id="42", repo_full_name="")
     assert cli.cmd_scan(args, {"APISEC_ENDPOINT": "https://a", "APISEC_PAT": "t"}) == 0
     assert ran[0][1]["GITHUB_REPOSITORY"] == "acme/payments"
+    assert ran[0][1]["APISEC_CANONICAL_REPO_ID"].endswith("acme/payments")
 
 
 def test_scan_refuses_a_repo_it_cannot_name(ran, tmp_path, capsys):
