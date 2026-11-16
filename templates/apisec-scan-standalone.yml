@@ -32,6 +32,10 @@ on:
         description: surface | legacy (blank = APISEC_RUN_PROFILE variable)
         type: string
         default: ''
+      scan_mode:
+        description: default | full | failed_only (when APISEC_CONNECTION_ID scan-plan is enabled)
+        type: string
+        default: ''
 
 permissions:
   contents: read
