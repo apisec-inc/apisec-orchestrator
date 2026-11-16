@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
@@ -70,7 +71,10 @@ def plan_candidates(
         with urllib.request.urlopen(request, timeout=120) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as exc:
-        print(f"APIsec scan-plan unavailable ({exc}); using push-timestamp cache.", file=__import__("sys").stderr)
+        print(
+            f"APIsec scan-plan unavailable ({exc}); using push-timestamp cache.",
+            file=sys.stderr,
+        )
         return None
 
     repos = payload.get("repositories") or []
