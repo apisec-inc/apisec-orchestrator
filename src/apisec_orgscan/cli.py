@@ -18,7 +18,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 
-from . import __version__, repos, settings, store
+from . import __version__, integrations, repos, settings, store
 
 
 def _write_outputs(outputs: Mapping[str, str]) -> None:
@@ -94,7 +94,16 @@ def cmd_plan(_: argparse.Namespace, env: Mapping[str, str]) -> int:
     limit = settings.max_repos(env)
     cap = min(limit, repos.MATRIX_HARD_LIMIT) if limit else repos.MATRIX_HARD_LIMIT
     force = settings.truthy(env.get("FORCE_FULL_SCAN"))
-    candidates = repos.select_candidates(org_repos, cache, force, cap, frozenset(exclude), empty)
+    apisec_plan = integrations.plan_candidates(
+        env,
+        scan_mode=run_settings.get("scan_mode", "default"),
+        max_repos=cap,
+        force_full_scan=force,
+    )
+    if apisec_plan is not None:
+        candidates = apisec_plan
+    else:
+        candidates = repos.select_candidates(org_repos, cache, force, cap, frozenset(exclude), empty)
 
     print(
         f"Scan plan: {len(candidates)} repo(s), max-parallel {run_settings['throughput']}, "
@@ -147,8 +156,11 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     # Surface CLI 1.2 identifies the repo as github:<owner>/<repo> from
     # GITHUB_REPOSITORY, which in this job names the repo running the workflow,
     # not the one scanned. An explicit repo id would override that.
-    child.pop("APISEC_CANONICAL_REPO_ID", None)
+    child["APISEC_CANONICAL_REPO_ID"] = f"github:{args.repo_id.strip()}"
     child["GITHUB_REPOSITORY"] = full_name
+    if env.get("APISEC_INTEGRATIONS_URL", "").strip():
+        child["APISEC_INTEGRATIONS_URL"] = env["APISEC_INTEGRATIONS_URL"].strip()
+    child["APISEC_CLIENT_SOURCE"] = "github-actions"
     child["APISEC_REGISTRATION_CODE"] = settings.registration_code(env)
     child["APISEC_RUN_PROFILE"] = env.get("RUN_PROFILE") or "surface"
     if env.get("APISEC_LLM_ENRICHMENT", "").strip():
@@ -176,6 +188,14 @@ def cmd_scan(args: argparse.Namespace, env: Mapping[str, str]) -> int:
         if dry_run:
             _error(f"{args.path} failed to analyze (exit {rc}).")
         else:
+            integrations.report_scan_failed(
+                env,
+                repo_id=args.repo_id,
+                full_name=full_name,
+                repo_path=args.path,
+                exit_code=rc,
+                message=f"Surface analyze exited {rc}",
+            )
             _error(f"{args.path} was not uploaded (exit {rc}); it is retried next run.")
     return rc
 

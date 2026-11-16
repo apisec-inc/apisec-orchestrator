@@ -23,6 +23,9 @@ name: APIsec Surface org scan
 #   APISEC_LLM_ENRICHMENT  0 to keep source snippets out of LLM gap-filling.
 #   APISEC_REGISTRATION_CODE  Your APIsec registration code. Required.
 #   APISEC_CLI_VERSION     Pin the Surface CLI version. Default: newest compatible 1.x.
+#   APISEC_CONNECTION_ID   GitHub App connection id in APIsec (enables scan-plan from inventory).
+#   APISEC_INTEGRATIONS_URL  External Integrations base URL (optional; derived from APISEC_ENDPOINT).
+#   SCAN_MODE              default | full | failed_only (when scan-plan is enabled).
 
 on:
   workflow_call:
@@ -43,6 +46,9 @@ on:
         type: string
         default: ''
       run_profile:
+        type: string
+        default: ''
+      scan_mode:
         type: string
         default: ''
     secrets:
@@ -113,6 +119,12 @@ jobs:
           APISEC_RUN_PROFILE: ${{ vars.APISEC_RUN_PROFILE }}
           APISEC_CLI_VERSION: ${{ vars.APISEC_CLI_VERSION }}
           APISEC_REGISTRATION_CODE: ${{ vars.APISEC_REGISTRATION_CODE }}
+          APISEC_PAT: ${{ secrets.APISEC_TOKEN }}
+          APISEC_ENDPOINT: ${{ vars.APISEC_ENDPOINT }}
+          APISEC_CONNECTION_ID: ${{ vars.APISEC_CONNECTION_ID }}
+          APISEC_INTEGRATIONS_URL: ${{ vars.APISEC_INTEGRATIONS_URL }}
+          IN_SCAN_MODE: ${{ inputs.scan_mode }}
+          SCAN_MODE: ${{ vars.SCAN_MODE }}
         run: apisec-orgscan plan
 
   scan:
@@ -163,10 +175,12 @@ jobs:
           REPO_FULL_NAME: ${{ matrix.repo_full_name }}
           APISEC_PAT: ${{ secrets.APISEC_TOKEN }}
           APISEC_ENDPOINT: ${{ vars.APISEC_ENDPOINT }}
+          APISEC_INTEGRATIONS_URL: ${{ vars.APISEC_INTEGRATIONS_URL }}
           APISEC_LLM_ENRICHMENT: ${{ vars.APISEC_LLM_ENRICHMENT }}
           APISEC_REGISTRATION_CODE: ${{ vars.APISEC_REGISTRATION_CODE }}
           RUN_PROFILE: ${{ needs.plan.outputs.run_profile }}
           DRY_RUN: ${{ inputs.dry_run }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: apisec-orgscan scan "repos/$REPO_NAME" --repo-id "$REPO_ID" --repo-full-name "$REPO_FULL_NAME"
       - name: Record
         if: ${{ !inputs.dry_run }}
