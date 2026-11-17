@@ -162,6 +162,7 @@ jobs:
           REPO_FULL_NAME: ${{ matrix.repo_full_name }}
           APISEC_PAT: ${{ secrets.APISEC_TOKEN }}
           APISEC_ENDPOINT: ${{ vars.APISEC_ENDPOINT }}
+          APISEC_CONNECTION_ID: ${{ vars.APISEC_CONNECTION_ID }}
           APISEC_INTEGRATIONS_URL: ${{ vars.APISEC_INTEGRATIONS_URL }}
           APISEC_LLM_ENRICHMENT: ${{ vars.APISEC_LLM_ENRICHMENT }}
           APISEC_REGISTRATION_CODE: ${{ vars.APISEC_REGISTRATION_CODE }}

@@ -10,7 +10,9 @@ import urllib.request
 from collections.abc import Mapping
 from typing import Any
 
-UPLOAD_EXIT_CODE = 2
+# Surface CLI exits that the CLI reports to the inventory itself (manifest error,
+# upload failure, policy violation after a successful upload, resource ceiling).
+CLI_REPORTED_EXIT_CODES = frozenset({1, 2, 3, 6})
 
 
 def _integrations_base(env: Mapping[str, str]) -> str | None:
@@ -97,7 +99,7 @@ def plan_candidates(
     print(
         f"APIsec scan-plan: {len(candidates)} repo(s) "
         f"(mode={payload.get('scanMode', scan_mode)}, source={payload.get('source', 'apisec')}).",
-        file=__import__("sys").stderr,
+        file=sys.stderr,
     )
     return candidates
 
@@ -125,12 +127,13 @@ def report_scan_failed(
     exit_code: int,
     message: str,
 ) -> None:
-    """Best-effort inventory update when Surface did not report (orchestrator path)."""
+    """Best-effort inventory update for a failure Surface could not report itself."""
+    if exit_code in CLI_REPORTED_EXIT_CODES or not _connection_id(env):
+        return
     base = _integrations_base(env)
     pat = _auth_pat(env)
     if not base or not pat:
         return
-    failure_type = "TEMPORARY" if exit_code == UPLOAD_EXIT_CODE else "PERMANENT"
     body = {
         "canonicalRepoId": f"github:{repo_id}",
         "fullName": full_name,
@@ -139,7 +142,6 @@ def report_scan_failed(
         "clientSource": "orchestrator",
         "message": message[:500],
         "exitCode": exit_code,
-        "failureType": failure_type,
         "runId": (env.get("GITHUB_RUN_ID") or "").strip() or None,
     }
     body = {k: v for k, v in body.items() if v is not None}
@@ -156,5 +158,5 @@ def report_scan_failed(
     try:
         with urllib.request.urlopen(request, timeout=60):
             pass
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+    except (OSError, ValueError):
         pass

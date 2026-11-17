@@ -158,6 +158,8 @@ def test_scan_runs_surface_with_settings(ran):
 
 
 def test_scan_gives_surface_the_scanned_repo_not_the_host_repo(ran):
+    # Surface identifies the repo as github:<owner>/<repo> from GITHUB_REPOSITORY;
+    # an explicit repo id would override it.
     env = {
         "APISEC_ENDPOINT": "https://a",
         "APISEC_PAT": "t",
