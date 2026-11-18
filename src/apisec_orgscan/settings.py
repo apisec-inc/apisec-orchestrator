@@ -17,6 +17,7 @@ CLI_REQUIREMENT = f"apisec-surface>={CLI_MIN_VERSION},<2"
 DEFAULT_THROUGHPUT = 2
 MAX_THROUGHPUT = 10
 RUN_PROFILES = ("surface", "legacy")
+SCAN_MODES = ("default", "full", "failed_only")
 
 
 def _int(raw: str | None) -> int:
@@ -41,6 +42,15 @@ def run_profile(env: Mapping[str, str]) -> tuple[str, str | None]:
 
 def max_repos(env: Mapping[str, str]) -> int:
     return max(0, _int(env.get("MAX_REPOS")))
+
+
+def scan_mode(env: Mapping[str, str]) -> tuple[str, str | None]:
+    raw = (env.get("IN_SCAN_MODE") or env.get("SCAN_MODE") or "default").strip().lower()
+    if raw in SCAN_MODES:
+        return raw, None
+    if raw.replace("-", "_") == "failed_only":
+        return "failed_only", None
+    return "default", f"'{raw}' is not a scan mode; using default."
 
 
 def truthy(raw: str | None) -> bool:
@@ -107,10 +117,12 @@ def resolve(
     """Settings the scan jobs need, plus warnings for the run log."""
     profile, profile_warning = run_profile(env)
     version, version_warning = cli_version(env, newest)
+    mode, mode_warning = scan_mode(env)
     settings = {
         "run_profile": profile,
         "cli_version": version,
         "throughput": str(throughput(env)),
+        "scan_mode": mode,
     }
     code_warning = (
         None
@@ -119,4 +131,4 @@ def resolve(
         f"scans register with the placeholder {REGISTRATION_CODE_PLACEHOLDER}. If it is set, your workflow "
         "file is from before 1.1 and doesn't pass it on: copy the current template."
     )
-    return settings, [w for w in (profile_warning, version_warning, code_warning) if w]
+    return settings, [w for w in (profile_warning, version_warning, mode_warning, code_warning) if w]
